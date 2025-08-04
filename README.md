@@ -7,7 +7,7 @@ The BehaveAI framework converts motion information into false colours that allow
 
 ## Prerequisites & Installation
 
-You need a python3 environment with OpenCV and Ultralytics (YOLO) libraries, plus a few other standard libraries (numpy, etc...)
+You need a python3 environment with OpenCV and Ultralytics (YOLO) libraries, plus a few other standard libraries (numpy, etc...) Should work fine with Linux, Windows and Mac. A CUDA-enabled GPU speeds up the training, but it works fine without.
  
 You only need three files - the annotation script (_BehaveAI_annotation.py_), the classification script (_BehaveAI_classify_track.py_), and the settings ini file (_BehaveAI_settings.ini_ - it must have this filename to work). First, create a working directory, add these three files, and adjust the settings .ini file to your needs (see below). For convenience, also add your video files to a subdirectory here.
  
