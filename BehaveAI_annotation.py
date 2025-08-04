@@ -8,6 +8,8 @@ import yaml
 import random
 import time
 from ultralytics import YOLO
+from collections import deque
+
 
 
 # Load configuration
@@ -304,6 +306,12 @@ print(f"Written motion YOLO dataset config to {motion_yaml_output}")
 
 capture = cv2.VideoCapture(video_path)
 total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+video_width  = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+video_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+right_frame_width = int(video_height/3)
+# ~ right_frame_width = 120
+
+
 
 # the frame window needs to be larger the further back in time smoothing covers
 frameWindow = 4 # suitable for sequential
@@ -319,6 +327,11 @@ if strategy == 'exponential':
 	if expA > 0.9 or expB > 0.9:
 		frameWindow = 45
 	# beyond this the numbers get very large - 0.95 would be ~90
+	
+	raw_buf = deque(maxlen=frameWindow) # length of animation preview
+else:
+	raw_buf = deque(maxlen=4) # in sequential mode restrict to 4 frames
+	
 
 # ~ print(f"expA {expA}, expB {expB} frameWindow {frameWindow}")
 
@@ -326,6 +339,7 @@ frameWindow = frameWindow * (frame_skip +1)
 
 # State variables
 drawing = False
+cursor_pos = (0, 0)
 ix = iy = -1
 boxes = []  # For all boxes: (x1, y1, x2, y2, class_idx) or (x1, y1, x2, y2, static_cls, motion_cls)
 grey_boxes = []
@@ -335,13 +349,21 @@ original_frame = None
 video_label = os.path.splitext(os.path.basename(video_path))[0]
 button_height = int(font_size * 40)
 # ~ bottom_bar_height = button_height 
-bottom_bar_height = 0 
+ts  = cv2.getTextSize("XyZ", cv2.FONT_HERSHEY_SIMPLEX, font_size, line_thickness)[0]
+bottom_bar_height = int(ts[1]) + 6 * line_thickness
 grey_mode = False
 annot_count = 1
 auto_ann_switch = 1
 show_mode = 1
 zoom_hide = 0
 disp_scale_factor = 1.0
+
+
+last_mouse_move = 0.0 # timestamp of last mouse move
+ANIM_STILL_THRESHOLD = 0.5   # seconds to wait before animating
+ANIM_FPS = 8				 # frames per second for the mini‐animation
+last_anim_draw = 0.0
+ANIM_DT = 1.0 / ANIM_FPS
 
 
 # zoom box variables
@@ -365,10 +387,15 @@ cv2.namedWindow(video_name, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
 # UI functions
 def draw_buttons(frame):
 	total_width = frame.shape[1]
-	h = frame.shape[0]
-	y_start = h - bottom_bar_height # Start from bottom
+	# ~ h = frame.shape[0]
+	h = int(video_height * disp_scale_factor)
+	y_start = h + bottom_bar_height + line_thickness # Start from bottom
+	scaled_h = frame.shape[0]
+	scaled_bottom_bar_height = scaled_h - y_start
+	ty = int(y_start + (scaled_bottom_bar_height - bottom_bar_height) / 2) + (line_thickness * 4)
 	
 	# Calculate button widths
+	ignore_first = 0
 	if hierarchical_mode:
 		total_buttons = len(primary_classes) + len(secondary_classes) + 1
 		button_width = total_width // total_buttons
@@ -377,59 +404,59 @@ def draw_buttons(frame):
 		total_buttons = len(primary_classes) + 1
 		button_width = total_width // total_buttons
 		secondary_offset = 0
-		
+	
 	# Draw primary classes
 	if len(primary_classes) > 1:
 		for idx in range(len(primary_classes)):
-			text = f"{primary_classes[idx]} ({primary_classes_info[idx][0]})"
-			color = primary_colors[idx]
-			x1, y1 = idx * button_width, y_start
-			x2, y2 = x1 + button_width, h
-			x1 = int(x1 * disp_scale_factor)
-			y1 = int(y1 * disp_scale_factor)
-			x2 = int(x2 * disp_scale_factor)
-			y2 = int(y2 * disp_scale_factor)
-			is_active = (idx == active_primary)
-			cv2.rectangle(frame, (x1, y1), (x2, y2), color, -line_thickness)
-			border_color = (255, 255, 255) if is_active else (0, 0, 0)
-			cv2.rectangle(frame, (x1, y1), (x2, y2), border_color, 2 if is_active else 1)
-			ts = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_size, line_thickness)[0]
-			tx = x1 + (button_width - ts[0]) // 2
-			ty = y_start + (bottom_bar_height + ts[1]) // 2
-			cv2.putText(frame, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, font_size, (0, 0, 0), line_thickness, cv2.LINE_AA)
+			if primary_classes[idx] != '0':
+				is_active = (idx == active_primary)
+				
+				if hierarchical_mode:
+					text = f"{primary_classes[idx].upper()} ({primary_classes_info[idx][0]})"
+				else:
+					text = f"{primary_classes[idx]} ({primary_classes_info[idx][0]})"
+				color = primary_colors[idx] if is_active else (128, 128, 128)
+				x1, y1 = idx * button_width, h
+				x2, y2 = x1 + button_width, scaled_h
+
+				cv2.rectangle(frame, (x1, y1), (x2, y2), color, -line_thickness)
+				border_color = (255, 255, 255) if is_active else (0, 0, 0)
+				cv2.rectangle(frame, (x1, y1), (x2, y2), border_color, 2 if is_active else 1)
+				ts = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_size, line_thickness)[0]
+				tx = x1 + (button_width - ts[0]) // 2
+				# ~ ty = h + (bottom_bar_height * disp_scale_factor + ts[1]) // 2
+				cv2.putText(frame, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, font_size, (0, 0, 0), line_thickness, cv2.LINE_AA)
 
 	# Draw secondary classes
 	if hierarchical_mode:
 		for idx in range(len(secondary_classes)):
-			text = f"{secondary_classes[idx]} ({secondary_classes_info[idx][0]})"
-			color = secondary_colors[idx]
-			x1, y1 = secondary_offset + idx * button_width, y_start
-			x2, y2 = x1 + button_width, h
-			x1 = int(x1 * disp_scale_factor)
-			y1 = int(y1 * disp_scale_factor)
-			x2 = int(x2 * disp_scale_factor)
-			y2 = int(y2 * disp_scale_factor)
 			is_active = (idx == active_secondary)
+			
+			text = f"{secondary_classes[idx]} ({secondary_classes_info[idx][0]})"
+			color = secondary_colors[idx] if is_active else (128, 128, 128)
+			x1, y1 = secondary_offset + idx * button_width, h
+			x2, y2 = x1 + button_width, scaled_h
+			
 			cv2.rectangle(frame, (x1, y1), (x2, y2), color, -line_thickness)
 			border_color = (255, 255, 255) if is_active else (0, 0, 0)
 			cv2.rectangle(frame, (x1, y1), (x2, y2), border_color, 2 if is_active else 1)
 			ts = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_size, line_thickness)[0]
 			tx = x1 + (button_width - ts[0]) // 2
-			ty = y_start + (bottom_bar_height + ts[1]) // 2
+			# ~ ty = h + (bottom_bar_height * disp_scale_factor + ts[1]) // 2
 			cv2.putText(frame, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, font_size, (0, 0, 0), line_thickness, cv2.LINE_AA)
 	
 	# Draw grey button
 	text = "Grey (g)"
 	color = (128, 128, 128)
-	x1, y1 = total_width - button_width, y_start
-	x2, y2 = total_width, h
+	x1, y1 = total_width - button_width, h
+	x2, y2 = total_width, scaled_h
 	is_active = grey_mode
 	cv2.rectangle(frame, (x1, y1), (x2, y2), color, -line_thickness)
 	border_color = (255, 255, 255) if is_active else (0, 0, 0)
 	cv2.rectangle(frame, (x1, y1), (x2, y2), border_color, 2 if is_active else 1)
 	ts = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_size, line_thickness)[0]
 	tx = x1 + (button_width - ts[0]) // 2
-	ty = y_start + (bottom_bar_height + ts[1]) // 2
+	# ~ ty = y_start + int((bottom_bar_height * disp_scale_factor + ts[1]) // 2)
 	cv2.putText(frame, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, font_size, (0, 0, 0), line_thickness, cv2.LINE_AA)
 
 def draw_boxes(frame):
@@ -501,22 +528,47 @@ def select_frame(x):
 
 def refresh_display():
 	if original_frame is not None:
-		# ~ disp = original_frame.copy()
+		
+		x, y = cursor_pos
+	
+		x = int(x / disp_scale_factor)
+		y = int(y / disp_scale_factor)
+		
+		if original_frame is None:
+			return
+		
+		h, w = original_frame.shape[:2]
+		
+
+		
+		# Show temporary box while drawing (clipped to above bottom bar)
 		if show_mode == 1:
 			disp = original_frame.copy()
 		else:
 			disp = fr.copy()
-
-		if zoom_hide == 0:
-			draw_zoom(disp, cursor_pos)  # Add zoom view unless briefly hidden for auto_annotate
-
+			
+		canvas = np.zeros((video_height + bottom_bar_height, video_width + right_frame_width + line_thickness, 3), dtype=disp.dtype)
+		canvas[:video_height,:video_width] = disp
+		disp = canvas
+		
+		
 		# Apply zoom to disp
 		if disp_scale_factor != 1.0:
 			disp = cv2.resize(disp, None, fx=disp_scale_factor, fy=disp_scale_factor, interpolation=cv2.INTER_LINEAR)
-	
-		# ~ draw_buttons(disp)
+							
+		draw_buttons(disp)
 		draw_boxes(disp)
 		
+		if drawing: # draw annotation box
+			color = (128, 128, 128) if grey_mode else primary_colors[active_primary]
+			# Clip drawing to above bottom bar
+			current_y = min(y, h)
+			cv2.rectangle(disp, (int(ix*disp_scale_factor), int(iy*disp_scale_factor)), (int(x*disp_scale_factor), int(current_y*disp_scale_factor)), color, line_thickness)
+		else: # draw crosshairs
+			cv2.line(disp, (int(x*disp_scale_factor), 0), (int(x*disp_scale_factor), int(h*disp_scale_factor)), (255, 255, 255), line_thickness)
+			cv2.line(disp, (0, int(y*disp_scale_factor)), (int(w*disp_scale_factor), int(y*disp_scale_factor)), (255, 255, 255), line_thickness)
+			
+		draw_zoom(disp, cursor_pos)  # Add zoom view to temporary drawing
 
 		cv2.imshow(video_name, disp)
 
@@ -528,23 +580,19 @@ def draw_zoom(disp, cursor_pos):
 	cx, cy = cursor_pos
 	cx = int(cx/disp_scale_factor)
 	cy = int(cy/disp_scale_factor)
-	h, w = disp.shape[:2]
-	h = int(h/disp_scale_factor)
-	w = int(w/disp_scale_factor)
-	bottom_bar_top = h - bottom_bar_height
-	
-	zoom_size = int(w * zoom_prop)
+	h = int(video_height)
+	w = int(video_width)
+	zoom_size = int(right_frame_width)
 	
 	# Skip if cursor is in bottom bar
 	# ~ if cy >= bottom_bar_top:
 		# ~ return
 	
 	# Calculate crop area around cursor
-	half_size = zoom_size // 2
+	half_size = zoom_size // 4
 	x1 = max(0, cx - half_size)
 	y1 = max(0, cy - half_size)
 	x2 = min(w, cx + half_size)
-	# ~ y2 = min(bottom_bar_top, cy + half_size)
 	y2 = min(h, cy + half_size)
 	
 	# Crop and enlarge
@@ -566,8 +614,8 @@ def draw_zoom(disp, cursor_pos):
 	rel_y = cy - y1
 	
 	# Resize both crops to the same zoomed size
-	zoom_w = int(zoom_size * zoom_factor * disp_scale_factor)
-	zoom_h = int(zoom_size * zoom_factor * disp_scale_factor)
+	zoom_w = int(zoom_size * disp_scale_factor)
+	zoom_h = int(zoom_size * disp_scale_factor)
 	zoomed_static = cv2.resize(crop_static, (zoom_w, zoom_h), interpolation=cv2.INTER_LINEAR)
 	zoomed_motion = cv2.resize(crop_motion, (zoom_w, zoom_h), interpolation=cv2.INTER_LINEAR)
 	
@@ -575,15 +623,9 @@ def draw_zoom(disp, cursor_pos):
 	zoom_x = int(rel_x * zoom_w / crop_w)
 	zoom_y = int(rel_y * zoom_h / crop_h)
 	
-	# Determine position (top-left or top-right) based on cursor location
-	margin = 10
-	if cx < w / 2:  # Cursor on left side - place zoom on right
-		pos_x = int(w * disp_scale_factor) - zoom_w - margin
-	else:		   # Cursor on right side - place zoom on left
-		pos_x = margin
+	pos_x = int(video_width * disp_scale_factor) + line_thickness
+	pos_y = 0
 	
-	# Place zoomed image in top corner
-	pos_y = margin
 	
 	# Place zoomed images
 	disp[pos_y:pos_y+zoom_h, pos_x:pos_x+zoom_w] = zoomed_static
@@ -636,6 +678,36 @@ def draw_zoom(disp, cursor_pos):
 			cv2.putText(disp, label, (pos_x, pos_y + zoom_h + label_h + line_thickness*2), cv2.FONT_HERSHEY_SIMPLEX, 
 									font_size, secondary_colors[active_secondary], line_thickness, cv2.LINE_AA)		
 
+	# ─── Mini‐animation box ───────────────────────────────────────────
+	now = time.time()
+	if (now - last_mouse_move) > ANIM_STILL_THRESHOLD and len(raw_buf) == raw_buf.maxlen:
+			# Calculate crop area around cursor
+		half_size = zoom_size // 2 ## don't zoom animation
+		x1 = max(0, cx - half_size)
+		y1 = max(0, cy - half_size)
+		x2 = min(w, cx + half_size)
+		y2 = min(h, cy + half_size)
+		# pick which buffer index to draw based on elapsed
+		idx = int(((now - last_mouse_move) * ANIM_FPS) % raw_buf.maxlen)
+		frame_to_draw = raw_buf[idx]
+		# crop exactly same way
+		small_crop = frame_to_draw[y1:y2, x1:x2]
+		if small_crop.size:
+			anim_w = zoom_w   # reuse same dims
+			anim_h = zoom_h
+			anim_zoom = cv2.resize(small_crop, (anim_w, anim_h), interpolation=cv2.INTER_LINEAR)
+			# position: beneath the two existing zoom boxes
+			anim_x = pos_x
+			anim_y = pos_y + (zoom_h * 2)
+			# draw it
+			disp[anim_y:anim_y+anim_h, anim_x:anim_x+anim_w] = anim_zoom
+			# border
+			cv2.rectangle(disp,
+						  (anim_x-1, anim_y-1),
+						  (anim_x + anim_w+1, anim_y + anim_h+1),
+						  (0,0,0), line_thickness)
+
+
 def mouse_callback(event, x, y, flags, param):
 	global ix, iy, drawing, active_primary, active_secondary, active_class, grey_mode
 	global boxes, grey_boxes, cursor_pos, zoom_hide
@@ -648,11 +720,11 @@ def mouse_callback(event, x, y, flags, param):
 	if original_frame is None:
 		return
 	
-	h, w = original_frame.shape[:2]
-	bottom_bar_top = h - bottom_bar_height
+	h = int(video_height * disp_scale_factor)
+	w = int(video_width * disp_scale_factor)
 	
 	if event == cv2.EVENT_LBUTTONDOWN:
-		if y >= bottom_bar_top:  # Check if click is in bottom bar
+		if x >= w and y >= h:  # click outside video region
 			# Handle button clicks
 			if hierarchical_mode:
 				total_buttons = len(primary_classes) + len(secondary_classes) + 1
@@ -682,49 +754,13 @@ def mouse_callback(event, x, y, flags, param):
 	elif event == cv2.EVENT_MOUSEMOVE:
 		zoom_hide = 0
 		if drawing:
-			# Show temporary box while drawing (clipped to above bottom bar)
-			if show_mode == 1:
-				temp = original_frame.copy()
-			else:
-				temp = fr.copy()
-			# Apply zoom to disp
-			if disp_scale_factor != 1.0:
-				temp = cv2.resize(temp, None, fx=disp_scale_factor, fy=disp_scale_factor, interpolation=cv2.INTER_LINEAR)
-								
-			# ~ draw_buttons(temp)
-			draw_boxes(temp)
-			
-			color = (128, 128, 128) if grey_mode else primary_colors[active_primary]
-			# Clip drawing to above bottom bar
-			current_y = min(y, bottom_bar_top - 1)
-			cv2.rectangle(temp, (int(ix*disp_scale_factor), int(iy*disp_scale_factor)), (int(x*disp_scale_factor), int(current_y*disp_scale_factor)), color, line_thickness)
-			draw_zoom(temp, cursor_pos)  # Add zoom view to temporary drawing
+			last_mouse_move = time.time() # record movement timestamp
+			refresh_display()
 
-			cv2.imshow(video_name, temp)
-		else:
-			# Show crosshair when not drawing
-			if show_mode == 1:
-				disp = original_frame.copy()
-			else:
-				disp = fr.copy()
-				
-			# Apply zoom to disp
-			if disp_scale_factor != 1.0:
-				disp = cv2.resize(disp, None, fx=disp_scale_factor, fy=disp_scale_factor, interpolation=cv2.INTER_LINEAR)
-				
-			# ~ draw_buttons(disp)
-			draw_boxes(disp)
-			# Clip crosshair to above bottom bar
-			cv2.line(disp, (int(x*disp_scale_factor), 0), (int(x*disp_scale_factor), int(bottom_bar_top*disp_scale_factor)), (255, 255, 255), line_thickness)
-			cv2.line(disp, (0, int(y*disp_scale_factor)), (int(w*disp_scale_factor), int(y*disp_scale_factor)), (255, 255, 255), line_thickness)
-			draw_zoom(disp, cursor_pos)  # Add zoom view
-
-			cv2.imshow(video_name, disp)
-	
 	elif event == cv2.EVENT_LBUTTONUP and drawing:
 		drawing = False
 		# Clip box coordinates to above bottom bar
-		current_y = min(y, bottom_bar_top - 1)
+		current_y = min(y, h)
 		
 		if abs(x - ix) > 5 and abs(current_y - iy) > 5:
 			if grey_mode:
@@ -744,7 +780,7 @@ def mouse_callback(event, x, y, flags, param):
 
 	elif event == cv2.EVENT_RBUTTONUP:
 		# Check if right-click is in bottom bar (ignore if so)
-		if y >= bottom_bar_top:
+		if y >= h:
 			return
 			
 		# Check boxes (reverse order to delete topmost first)
@@ -1033,14 +1069,16 @@ def auto_annotate():
 
 # Setup UI and loop
 cv2.namedWindow(video_name, cv2.WINDOW_NORMAL)
-# ~ cv2.createTrackbar('Frame', video_name, frameWindow + 1, total_frames - 1 - frameWindow, select_frame)
 cv2.createTrackbar('Frame', video_name, 0, total_frames - frameWindow + frame_skip -1, select_frame)
-# ~ cv2.createTrackbar('Frame', video_name, 1, total_frames - 1, select_frame)
 cv2.setMouseCallback(video_name, mouse_callback)
 
 
 
 while True:
+	
+	now = time.time()
+
+	# Load new frame
 	if frame_updated:
 		frame_updated = False
 		boxes.clear()
@@ -1051,14 +1089,15 @@ while True:
 		
 		frame_count = 0
 		for i in range(frameWindow):
-			ret, fr = capture.read()
+			ret, raw_frame = capture.read()
 			if not ret:
 				break	
 					
 			if frame_count == 0:
-
+				fr = raw_frame.copy()
 				if scale_factor != 1.0:
 					fr = cv2.resize(fr, (0, 0), fx=scale_factor, fy=scale_factor)
+				raw_buf.append(fr.copy())
 				gray = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
 				
 				if i == 0:
@@ -1090,25 +1129,34 @@ while True:
 
 		if motion_image is not None:
 			original_frame = motion_image.copy()
-			refresh_display()
+			# refresh_display()
 
 		if auto_ann_switch == 1:
 			auto_annotate()
 			zoom_hide = 1
-			refresh_display()
-			
-	
+			# refresh_display()()
+		
+		need_redraw = True
+		last_anim_draw = time.time()
+	else:
+		need_redraw = False
+		
+	# animation tick
+	if (now - last_mouse_move) > ANIM_STILL_THRESHOLD and (now - last_anim_draw) >= ANIM_DT:
+		last_anim_draw = now
+		# redraw in place (draw_zoom will pick the correct buffer index)
+		need_redraw = True
+
+	# listen for keys
 	if cv2.getWindowProperty(video_name, cv2.WND_PROP_VISIBLE) < 1:
 		break
 		
-	# ~ time.sleep(0.002)
 	key = cv2.waitKey(5) & 0xFF
 	if key == 27:  # ESC
 		break
 	if key == 8:  # BACKSPACE
 		boxes.clear()
 		grey_boxes.clear()
-		refresh_display()
 	elif key == 13:  # ENTER
 		save_annotation()
 		grey_boxes.clear()
@@ -1117,8 +1165,7 @@ while True:
 		frame_number = min(frame_number + 1, total_frames - 2)
 		frame_updated = True
 		cv2.setTrackbarPos('Frame', video_name, frame_number)
-		
-		refresh_display()
+
 		
 	elif key == ord('u'):  # Undo
 		if grey_mode:
@@ -1126,71 +1173,64 @@ while True:
 				grey_boxes.pop()
 		elif boxes:
 			boxes.pop()
-		refresh_display()
 	elif key == ord('g'):  # Grey mode
 		grey_mode = True
-		refresh_display()
+		
 	elif key in primary_class_dict and key in secondary_class_dict: # dual key for both primary and secondary
-		active_primary = primary_class_dict[key]
-		active_secondary = secondary_class_dict[key]
-		grey_mode = False
-		refresh_display()
-	elif key in primary_class_dict: 
-		active_primary = primary_class_dict[key]
-		if active_primary < len(primary_static_classes):
-			show_mode = -1 # static RGB
-		else:
-			show_mode =1 # motion false colour
-		grey_mode = False
-		refresh_display()
-	elif key in secondary_class_dict: 
-		active_secondary = secondary_class_dict[key]
-		if active_secondary < len(secondary_static_classes):
-			show_mode = -1 # static RGB
-		else:
-			show_mode =1 # motion false colour
-		grey_mode = False
-		refresh_display()
+		if key != ord('0'):
+			print("zero")
+			active_primary = primary_class_dict[key]
+			active_secondary = secondary_class_dict[key]
+			grey_mode = False
+		
+	elif key in primary_class_dict:
+		if key != ord('0'):
+			active_primary = primary_class_dict[key]
+			if active_primary < len(primary_static_classes):
+				show_mode = -1 # static RGB
+			else:
+				show_mode =1 # motion false colour
+			grey_mode = False
+			
+	elif key in secondary_class_dict:
+		if key != ord('0'):
+			active_secondary = secondary_class_dict[key]
+			if active_secondary < len(secondary_static_classes):
+				show_mode = -1 # static RGB
+			else:
+				show_mode =1 # motion false colour
+			grey_mode = False
+			
 	elif key == 83:  # Right arrow
 		frame_number = min(frame_number + 1, total_frames - 2)
 		frame_updated = True
 		cv2.setTrackbarPos('Frame', video_name, frame_number)
-		# ~ if auto_ann_switch == 1:
-			# ~ auto_annotate()
 	elif key == 81:  # Left arrow
 		frame_number = max(frame_number - 1, 0)
 		frame_updated = True
 		cv2.setTrackbarPos('Frame', video_name, frame_number)
-		# ~ if auto_ann_switch == 1:
-			# ~ auto_annotate()
 	elif key == 46:  # > (.)
 		frame_number = min(frame_number + 10, total_frames - 2)
 		frame_updated = True
 		cv2.setTrackbarPos('Frame', video_name, frame_number)
-		# ~ if auto_ann_switch == 1:
-			# ~ auto_annotate()
 	elif key == 44:  # < (,)
 		frame_number = max(frame_number - 10, 0)
 		frame_updated = True
 		cv2.setTrackbarPos('Frame', video_name, frame_number)
-		# ~ if auto_ann_switch == 1:
-			# ~ auto_annotate()
 	elif key == 32:  # SPACE
 		show_mode *= -1
-		refresh_display()
 	elif key == 35:  # HASH # KEY
 		auto_ann_switch *= -1
 		if auto_ann_switch == 1:
 			auto_annotate()
 		zoom_hide = 1
-		refresh_display()
 	elif key == 45:  # - minus
 		disp_scale_factor *= 0.8
-		refresh_display()		
 	elif key == 61:  # =+ equals (plus)
 		disp_scale_factor *= 1.25
-		refresh_display()	
-
+		
+	if need_redraw:
+		refresh_display()
 
 capture.release()
 cv2.destroyAllWindows()
