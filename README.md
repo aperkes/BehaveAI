@@ -31,8 +31,8 @@ The ‘_sequential_’ method uses discrete frames rather than exponential smoot
 
 ![gull_settings_example](https://github.com/user-attachments/assets/46c94f90-5102-466b-91dc-a38d56f3c2dc)
 
-|----|----|----|
 | Parameter | Range | Description |
+|----|----|----|
 | [...]_classes | comma-separated list (0=ignore) | List the names of the classifiers (motion & static, primary & secondary) |
 | [...]_colors | comma-separated RGB values, separated with semicolons | Specify the RGB colours associated with each class |
 | [...]_hotkeys | comma-separated list of single letters | Specify which keyboard key to associate with each class for annotation |
@@ -64,7 +64,7 @@ The ‘_sequential_’ method uses discrete frames rather than exponential smoot
 | Escape | Exit annotation |
 | # | Toggle auto-annotate (semi-supervised annotation - only if you've made a model) |
 | = | Zoom in preview window (+ key) |
-| - | Zoom out preview window |A
+| - | Zoom out preview window |
 
 Run the BehaveAI_annotation.py script and select a video (to run a python script, either call the file from a command line, or use an IDE such as Anaconda or Geany). You can track through and draw boxes over the things you want to classify. Note all the keyboard shortcuts. It has undo functions, grey-out functions, track single or 10-frame jumps etc... plus all the primary and secondary classes. With each frame, make sure you select (or grey out) everything. Press 'enter' to save the frame and move on.
  
