@@ -295,25 +295,6 @@ if hierarchical_mode:
 			model_dir = f"model_static_static_{primary_class}"
 			weights_path = os.path.join(model_dir, "train", "weights", "best.pt")
 			
-			# Check if model exists
-			# ~ if not os.path.exists(weights_path):
-				# ~ print(f'Secondary static model for "{primary_class}" not found, building it...')
-				
-				# ~ # Train the model
-				# ~ model = YOLO(secondary_classifier)
-				# ~ model.train(
-					# ~ data=data_dir,
-					# ~ epochs=secondary_epochs,
-					# ~ imgsz=224,
-					# ~ project=model_dir,
-					# ~ name="train",
-					# ~ exist_ok=True
-				# ~ )
-				# ~ print(f'Done training secondary static model for "{primary_class}"')
-			# ~ else:
-				# ~ print(f'Secondary static model for "{primary_class}" found')
-
-
 			maybe_retrain(model_dir, data_dir, model_dir, 
 				weights_path, secondary_classifier, secondary_epochs, 224)
 
@@ -344,26 +325,6 @@ if hierarchical_mode:
 			model_dir = f"model_secondary_motion_{primary_class}"
 			weights_path = os.path.join(model_dir, "train", "weights", "best.pt")
 			
-			# Check if model exists
-			# ~ if not os.path.exists(weights_path):
-				# ~ print(f'Secondary motion model for "{primary_class}" not found, building it...')
-				
-				# ~ # Train the model
-				# ~ model = YOLO(secondary_classifier)
-				# ~ model.train(
-					# ~ data=data_dir,
-					# ~ epochs=secondary_epochs,
-					##hsv_h=0.0, # disable hue & saturation augmentation - we don't want the colours messed with for motion images
-					##hsv_s=0.1,
-					# ~ imgsz=224,
-					# ~ project=model_dir,
-					# ~ name="train",
-					# ~ exist_ok=True
-				# ~ )				
-				# ~ print(f'Done training secondary motion model for "{primary_class}"')
-			# ~ else:
-				# ~ print(f'Secondary motion model for "{primary_class}" found')
-
 			maybe_retrain(model_dir, data_dir, model_dir, 
 				weights_path, secondary_classifier, secondary_epochs, 224)
 
@@ -374,45 +335,11 @@ if hierarchical_mode:
 
 #-------CHECK PRIMARY MODEL EXISTS----------
 if primary_static_classes[0] != '0':
-	# ~ if not os.path.exists(primary_static_model_path):
-		# ~ print('Primary static model not found, building it...')
-		
-		# ~ # Train the model
-		# ~ model = YOLO(primary_classifier)
-		# ~ model.train(
-			# ~ data=primary_static_yaml_path,
-			# ~ epochs=primary_epochs,
-			# ~ imgsz=640,
-			# ~ project=primary_static_project_path,
-			# ~ name="train",
-			# ~ exist_ok=True
-		# ~ )
-		# ~ print('Done training primary static model')
-	# ~ else:
-		# ~ print('Primary static model found')
 	maybe_retrain('primary static', primary_static_yaml_path, primary_static_project_path, 
 		primary_static_model_path, primary_classifier, primary_epochs, 640)
 
 
 if primary_motion_classes[0] != '0':
-	# ~ if not os.path.exists(primary_motion_model_path):
-		# ~ print('Primary motion model not found, building it...')
-		
-		# ~ # Train the model
-		# ~ model = YOLO(primary_classifier)
-		# ~ model.train(
-			# ~ data=primary_motion_yaml_path,
-			# ~ epochs=primary_epochs,
-			###hsv_h=0.05, # disable hue & saturation augmentation - we don't want the colours messed with for motion images
-			###hsv_s=0.1,
-			# ~ imgsz=640,
-			# ~ project=primary_motion_project_path,
-			# ~ name="train",
-			# ~ exist_ok=True
-		# ~ )
-		# ~ print('Done training primary motion model')
-	# ~ else:
-		# ~ print('Primary motion model found')	
 	maybe_retrain('primary motion', primary_motion_yaml_path, primary_motion_project_path, 
 		primary_motion_model_path, primary_classifier, primary_epochs, 640)
 
@@ -653,13 +580,14 @@ def process_video(file):
 	frame_count = 0
 	
 	while True:
-		ret, frame = cap.read()
+		ret, raw_frame = cap.read()
 		if not ret: break
 		frame_idx += 1
 		if frame_count == 0:
 			if scale_factor != 1.0:
-				frame = cv2.resize(frame, None, fx=scale_factor, fy=scale_factor)
-			gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+				raw_frame = cv2.resize(raw_frame, None, fx=scale_factor, fy=scale_factor)
+			gray = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY)
+			frame = raw_frame.copy()
 			if prev_frames is None:
 				prev_frames = [gray.copy() for _ in range(3)]
 				continue
