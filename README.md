@@ -14,7 +14,7 @@ You need to adjust the BehaveAI_settings.ini file with your settings. Have a rea
 
 ### Primary and secondary, static and motion classifiers
 
-The BehaveAI framework uses to streams of video informaiton, still (_static_) frames, and false-colour-motion (_motion_) frames Primary classifiers (either motion or static) detect and classify objects across each whole frame. You must specify at least one primary classifier, but can specify multiple across both motion and staic streams. The aim here is to make detection as easy as possible for the classifier (some things are easy to see with motion, others static).
+The BehaveAI framework uses to streams of video information, still (_static_) frames, and false-colour-motion (_motion_) frames Primary classifiers (either motion or static) detect and classify objects across each whole frame. You must specify at least one primary classifier, but can specify multiple across both motion and static streams. The aim here is to make detection as easy as possible for the classifier (some things are easy to see with motion, others static).
  
 You can optionally then use secondary classifiers (making your model hierarchical). When you specify these, anything found by a primary classifier will be cropped and sent to the secondary classifier. This can allow you to separate the tasks of detection and classification. See the fly and gull examples for a somewhat complex mix. There are more nuanced settings too. You might not want all primary classes to be sent to the secondary classifier, such as a fly in flight (its wings are a blur, so it's not possible to determine the sex, so flying flies are ignored by the secondary classifiers ).
 
@@ -54,9 +54,14 @@ The ‘_sequential_’ method uses discrete frames rather than exponential smoot
 | secondary_classifier | Various options from ultralytics | Similar to above, although secondary classifiers are run from cropped primary classes, so  they use models with the '-cls' suffix. Default yolo11s-cls.pt |
 | secondary_epochs | Integer | How many training epochs to run, default 50 |
 | [...]_conf_thresh | Proportion 0-1 | The confidence threshold used to label classes in video output, and add them to the .csv data output (which saves the actual confidence too) |
-| match_distance_thresh | Integers > 0 | Threshold below which nearby identified objects can be combined betwen frames, default 200, but should be smaller for low-res video, or higher for HD or fast-moving objects |
+| match_distance_thresh | Integers > 0 | Threshold below which nearby identified object boxes can be combined between frames, default 200, but should be smaller for low-res video, or higher for HD or fast-moving objects |
 | delete_after_missed | Integer > 0 | Number of frames after which temporary IDs should be deleted, higher numbers will track objects that disappear and reappear over longer periods |
-| centroid_merge_thresh | Integer > 0 | ... |
+| centroid_merge_thresh | Integer > 0 | Merges any two boxes within this pixel radius, default 50, but raise for HD video or larger objects |
+| iou_thresh | Proportion 0-1 | IOU threshold intersection of two boxes from static vs motion streams, above which any two boxes are combined. Lower numbers will combine objects with less overlap |
+| process_noise_pos | Numeric > 0 | Kalman filter - specifies how erratically objects are likely to be moving (increase if objects move more erratically), default 0.01, but experiment with your own videos, values of 1 work with other videos |
+| process_noise_vel | Numeric > 0 | Kalman filter - increase if objects change speed/direction frequently, default 0.1 |
+| measurement_noise | Numeric > 0 | Kalman filter - specifies the amount of noise in detections (as opposed to true object movement), increase if detections are noisy/jumpy, default 0.1 but likely requires experiment |
+
 
 ## Annotating
 
