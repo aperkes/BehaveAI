@@ -1,5 +1,4 @@
-<img width="300" height="215" alt="BehaveAI Logo" src="https://github.com/user-attachments/assets/76508de5-3590-46b4-98aa-6fe6beaf5b05" />
-
+<img width="450" height="76" alt="BehaveAi logo" src="https://github.com/user-attachments/assets/73c30b1b-d73c-4f63-8783-13270bc14b8e" />
 
 # A Framework for detecting, classifying and tracking moving objects
 
