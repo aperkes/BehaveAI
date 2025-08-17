@@ -208,7 +208,7 @@ Once you're happy with the model, create a folder in your working directory call
 
 ## Workflow
 
-<img width="2245" src="https://github.com/troscianko/BehaveAI/blob/Toshea111-patch-1/Behave%20Pipeline.png" />
+<img width="2245" src="https://github.com/user-attachments/assets/5260ba9f-0392-4d1a-9bb5-0daa8ffbf654" />
 
 _Overview of the BehaveAI pipeline_
 
