@@ -11,10 +11,10 @@ The BehaveAI framework converts motion information into false colours that allow
 - Identifies small, fast moving, and motion-blurred targets
 - Can track any type(s) of animal/object
 - Tracks multiple individuals, classifying the behaviour of each independently
-- Built around the verstile YOLO (You Only Look Once) architecture
+- Built around the verstile [YOLO](https://github.com/ultralytics/ultralytics) (You Only Look Once) architecture
 - Computationally efficient - runs fine on low-end devices without GPUs
 - Lightweight installation and intuitive user interface
-- Free & open source (GNU Afferro General Public License)
+- Free & open source ([GNU Afferro General Public License](https://github.com/troscianko/BehaveAI/blob/main/LICENSE))
 
 ## Prerequisites & installation
 
@@ -26,7 +26,7 @@ pip install opencv-python numpy ultralytics scipy PyYAML
 
 A CUDA-enabled GPU speeds up the training, but it works fine without.
  
-Place the BehaveAI files in a working directory and [adjust the _BehaveAI_settings.ini_ file](#setting-parameters) to fit your needs using a text editor. For convenience, also create a subdirectory here named 'clips' and place your video files within. Run the BehaveAI.py script (either from the command line, Anaconda, or an IDE such as Geany, Jupyter, or Visual Studio Code). This will bring up the launcher GUI:
+Place the BehaveAI files in a working directory and [adjust the _BehaveAI_settings.ini_ file](#setting-parameters) to fit your needs using a text editor. For convenience, also create a subdirectory here named 'clips' and place your video files within. Run the BehaveAI.py script (either from the command line, [Anaconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html), or an IDE such as [Geany](https://github.com/geany/geany), [Jupyter](https://github.com/jupyter/notebook), [Spyder](https://github.com/spyder-ide/spyder), or [Visual Studio Code](https://github.com/microsoft/vscode)). This will bring up the launcher GUI:
 
 <img width="600" alt="Launcher GUI" src="https://github.com/user-attachments/assets/f4ee9768-724f-4d79-a1f5-d5c60b7f0d99" />
 
