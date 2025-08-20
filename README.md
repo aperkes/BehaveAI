@@ -46,6 +46,10 @@ _Example of static and motion frames from the same section of video_
  
 You can then optionally use secondary classifiers to identify featues within primary classes (making your model hierarchical). When you specify these, anything found by a primary classifier will be cropped and sent to the secondary classifier (e.g. male vs female classification for the primary class of a stationary bird). This can allow you to separate the tasks of detection and feature extraction. See the [fly](#complex-hierarchical-example) and [gull](#motion-strategy) examples for a somewhat complex mix. There is nuance to utilising these settings effectively. You might not want all primary classes to be sent to a secondary classifier, such as a fly in flight (its wings are a blur, so it's not possible to determine the sex, so flying flies are ignored by the secondary classifiers). For the highest computational efficiecy, specify a single primary class and let the secondary classifiers (which are much faster as they use cropped regions) do more work.
 
+![Motion Examples 2](https://github.com/user-attachments/assets/d0b1ec20-c306-40c1-a6af-7d72432c47d8)
+
+_Examples of secondary classifiers within the same primary motion class, these being suface and dive within the primary class of swim_
+
 #### Simple tracking example
 
 Tracking moths flying against a moving background using only the motion stream (_BehaveAI_settings.ini_ file):
