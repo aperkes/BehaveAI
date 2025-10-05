@@ -3,12 +3,15 @@ import os
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog
+from tkinter import messagebox
 import configparser
 import yaml
 import random
 import time
 from ultralytics import YOLO
 from collections import deque
+import platform
+import config_watcher
 
 
 
@@ -168,8 +171,10 @@ if len(primary_static_classes) <= 1:
 active_secondary = 0
 
 
+
 #-------Check whether models exist-------------
 
+motion_model_count = 0
 
 # Train secondary classifiers for each static class
 secondary_static_models = None
@@ -239,6 +244,7 @@ if hierarchical_mode:
 				print(f'Secondary motion model for "{primary_class}" found')
 				# Load the trained model
 				secondary_motion_models[primary_class] = YOLO(weights_path)
+				motion_model_count += 1
 				
 		# ~ print(f"secondary_motion_models {secondary_motion_models}")
 
@@ -258,7 +264,31 @@ if primary_motion_classes[0] != '0':
 	else:
 		print('Primary motion model found')
 		model_motion = YOLO(primary_motion_model_path)
+		motion_model_count += 1
 	
+
+if motion_model_count > 0:
+	# check whether settings have been changed, and motion annotation library needs rebuilding 
+	settings_changed = config_watcher.check_settings_changed(current_config_path='BehaveAI_settings.ini', saved_config_path=None, model_dirs=['model_primary_motion'])
+	
+	if settings_changed:
+		root = tk.Tk()
+		root.withdraw()
+		msg = (
+			"Motion-processing settings have changed since training motion model(s).\n\n"
+			"Do you want to rebuild the annotation dataset now?"
+		)
+		user_wants_regen = messagebox.askyesno("Rebuild annotations?", msg)
+		root.destroy()
+	
+		if user_wants_regen:
+			print("User requested regeneration of annotations...")
+			rc = config_watcher.run_regeneration(regen_script='Regenerate_annotations.py', regen_args=None)
+			if rc == 0:
+				print("Regeneration script completed successfully.")
+			else:
+				print(f"Warning: regeneration script returned code {rc}.")
+
 
 # File dialog for video selection
 clips_dir = os.path.join(os.getcwd(), "clips")
@@ -339,14 +369,16 @@ else:
 
 frameWindow = frameWindow * (frame_skip +1)
 
+# initial last-frame to display = earliest valid last-frame (frameWindow-1), clamped to [0, total_frames-1]
+frame_number = min(max(frameWindow - 1, 0), total_frames - 1)
+frame_updated = True
+
 # State variables
 drawing = False
 cursor_pos = (0, 0)
 ix = iy = -1
 boxes = []  # For all boxes: (x1, y1, x2, y2, class_idx) or (x1, y1, x2, y2, static_cls, motion_cls)
 grey_boxes = []
-frame_number = 0
-frame_updated = True
 original_frame = None
 video_label = os.path.splitext(os.path.basename(video_path))[0]
 button_height = int(font_size * 40)
@@ -383,8 +415,7 @@ elements = ["BehaveAI Video:", video_label, "ESC=quit BACKSPACE=clear u=undo ENT
 
 video_name = ' '.join(elements)
 
-cv2.namedWindow(video_name, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
-
+cv2.namedWindow(video_name, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL | cv2.WINDOW_KEEPRATIO)
 
 
 # UI functions
@@ -572,6 +603,11 @@ def refresh_display():
 			cv2.line(disp, (0, int(y*disp_scale_factor)), (int(w*disp_scale_factor), int(y*disp_scale_factor)), (255, 255, 255), line_thickness)
 			
 		draw_zoom(disp, cursor_pos)  # Add zoom view to temporary drawing
+		
+		# draw current (last) frame number top-left so label matches trackbar
+		# ~ label = f"Frame (last): {frame_number}"
+		# ~ cv2.putText(disp, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, font_size, (255,255,255), line_thickness, cv2.LINE_AA)
+
 
 		cv2.imshow(video_name, disp)
 
@@ -1167,7 +1203,9 @@ def auto_annotate():
 
 # Setup UI and loop
 cv2.namedWindow(video_name, cv2.WINDOW_NORMAL)
-cv2.createTrackbar('Frame', video_name, 0, total_frames - frameWindow + frame_skip -1, select_frame)
+# ~ cv2.createTrackbar('Frame', video_name, 0, total_frames - frameWindow + frame_skip -1, select_frame)
+cv2.createTrackbar('Frame', video_name, 0, max(0, total_frames - 1), select_frame)
+cv2.setTrackbarPos('Frame', video_name, frame_number)
 cv2.setMouseCallback(video_name, mouse_callback)
 
 
@@ -1181,70 +1219,90 @@ while True:
 		frame_updated = False
 		boxes.clear()
 		grey_boxes.clear()
-		capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-		prev_frames = [None] * 3
-		motion_image = None
-		
-		frame_count = 0
-		for i in range(frameWindow):
-			ret, raw_frame = capture.read()
-			if not ret:
-				break	
-					
-			if frame_count == 0:
-				fr = raw_frame.copy()
-				if scale_factor != 1.0:
-					fr = cv2.resize(fr, (0, 0), fx=scale_factor, fy=scale_factor)
-				raw_buf.append(fr.copy())
-				gray = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
-				
-				if i == 0:
-					prev_frames = [gray.copy()] * 3
-					continue
-				
-				diffs = [cv2.absdiff(prev_frames[j], gray) for j in range(3)]
-				
-				if strategy == 'exponential':
-					prev_frames[0] = gray
-					prev_frames[1] = cv2.addWeighted(prev_frames[1], expA, gray, expA2, 0)
-					prev_frames[2] = cv2.addWeighted(prev_frames[2], expB, gray, expB2, 0)
-				elif strategy == 'sequential':
-					prev_frames[2] = prev_frames[1]
-					prev_frames[1] = prev_frames[0]
-					prev_frames[0] = gray
-
-			frame_count += 1
-			
-			if frame_count > frame_skip:
-				frame_count = 0
-
-		if chromatic_tail_only == 'true':
-			tb = cv2.subtract(diffs[0], diffs[1])	
-			tr = cv2.subtract(diffs[2], diffs[1])
-			tg = cv2.subtract(diffs[1], diffs[0])
-					
-			blue = cv2.addWeighted(gray, lum_weight, tb, rgb_multipliers[2], motion_threshold)
-			green = cv2.addWeighted(gray, lum_weight, tg, rgb_multipliers[1], motion_threshold)
-			red = cv2.addWeighted(gray, lum_weight, tr, rgb_multipliers[0], motion_threshold)
-		else:
-			blue = cv2.addWeighted(gray, lum_weight, diffs[0], rgb_multipliers[2], motion_threshold)
-			green = cv2.addWeighted(gray, lum_weight, diffs[1], rgb_multipliers[1], motion_threshold)
-			red = cv2.addWeighted(gray, lum_weight, diffs[2], rgb_multipliers[0], motion_threshold)
-			
-		motion_image = cv2.merge((blue, green, red)).astype(np.uint8)
 	
-
-		if motion_image is not None:
-			original_frame = motion_image.copy()
-			# refresh_display()
-
-		if auto_ann_switch == 1:
-			auto_annotate()
-			zoom_hide = 1
-			# refresh_display()()
-		
-		need_redraw = True
-		last_anim_draw = time.time()
+		# Treat frame_number as the *last* frame of the window
+		last_frame = frame_number
+		start_frame = last_frame - frameWindow + 1  # start so that last read frame == last_frame
+	
+		# If the window extends before the start of video => show a blank area
+		if start_frame < 0:
+			# blank frames for display when not enough preceding frames
+			original_frame = np.zeros((video_height, video_width, 3), dtype=np.uint8)
+			fr = original_frame.copy()
+			motion_image = original_frame.copy()
+			raw_buf.clear()
+			need_redraw = True
+			last_anim_draw = time.time()
+			# Do not auto-annotate when there aren't enough frames
+			# (user wanted blank display for numbers below window size)
+			# Leave boxes empty and continue to redraw the blank.
+		else:
+			# Position capture at start_frame (so last read corresponds to last_frame)
+			capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+			prev_frames = [None] * 3
+			motion_image = None
+	
+			frame_count = 0
+			raw_buf.clear()
+			for i in range(frameWindow):
+				ret, raw_frame = capture.read()
+				if not ret:
+					break
+	
+				if frame_count == 0:
+					fr = raw_frame.copy()
+					if scale_factor != 1.0:
+						fr = cv2.resize(fr, (0, 0), fx=scale_factor, fy=scale_factor)
+					raw_buf.append(fr.copy())
+					gray = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
+	
+					if i == 0:
+						prev_frames = [gray.copy()] * 3
+						# first processed frame in window; continue to next raw read
+						frame_count += 1
+						if frame_count > frame_skip:
+							frame_count = 0
+						continue
+	
+					diffs = [cv2.absdiff(prev_frames[j], gray) for j in range(3)]
+	
+					if strategy == 'exponential':
+						prev_frames[0] = gray
+						prev_frames[1] = cv2.addWeighted(prev_frames[1], expA, gray, expA2, 0)
+						prev_frames[2] = cv2.addWeighted(prev_frames[2], expB, gray, expB2, 0)
+					elif strategy == 'sequential':
+						prev_frames[2] = prev_frames[1]
+						prev_frames[1] = prev_frames[0]
+						prev_frames[0] = gray
+	
+				frame_count += 1
+				if frame_count > frame_skip:
+					frame_count = 0
+	
+			# Build motion image from diffs/gray (same logic as before)
+			if 'diffs' in locals():
+				if chromatic_tail_only == 'true':
+					tb = cv2.subtract(diffs[0], diffs[1])
+					tr = cv2.subtract(diffs[2], diffs[1])
+					tg = cv2.subtract(diffs[1], diffs[0])
+	
+					blue = cv2.addWeighted(gray, lum_weight, tb, rgb_multipliers[2], motion_threshold)
+					green = cv2.addWeighted(gray, lum_weight, tg, rgb_multipliers[1], motion_threshold)
+					red = cv2.addWeighted(gray, lum_weight, tr, rgb_multipliers[0], motion_threshold)
+				else:
+					blue = cv2.addWeighted(gray, lum_weight, diffs[0], rgb_multipliers[2], motion_threshold)
+					green = cv2.addWeighted(gray, lum_weight, diffs[1], rgb_multipliers[1], motion_threshold)
+					red = cv2.addWeighted(gray, lum_weight, diffs[2], rgb_multipliers[0], motion_threshold)
+	
+				motion_image = cv2.merge((blue, green, red)).astype(np.uint8)
+				original_frame = motion_image.copy()
+	
+				if auto_ann_switch == 1:
+					auto_annotate()
+					zoom_hide = 1
+	
+			need_redraw = True
+			last_anim_draw = time.time()
 	else:
 		need_redraw = False
 		
@@ -1309,7 +1367,7 @@ while True:
 			grey_mode = False
 			
 	elif key == 83:  # Right arrow
-		frame_number = min(frame_number + 1, total_frames - 2)
+		frame_number = min(frame_number + 1, total_frames - 1)
 		frame_updated = True
 		cv2.setTrackbarPos('Frame', video_name, frame_number)
 	elif key == 81:  # Left arrow
@@ -1317,7 +1375,7 @@ while True:
 		frame_updated = True
 		cv2.setTrackbarPos('Frame', video_name, frame_number)
 	elif key == 46:  # > (.)
-		frame_number = min(frame_number + 10, total_frames - 2)
+		frame_number = min(frame_number + 10, total_frames - 1)
 		frame_updated = True
 		cv2.setTrackbarPos('Frame', video_name, frame_number)
 	elif key == 44:  # < (,)

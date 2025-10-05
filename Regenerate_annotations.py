@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import cv2
 import os
 import numpy as np
@@ -17,33 +18,31 @@ def load_config(config_path):
 		params['expA'] = float(config['DEFAULT'].get('expA', '0.5'))
 		params['expB'] = float(config['DEFAULT'].get('expB', '0.8'))
 		params['strategy'] = config['DEFAULT'].get('strategy', 'exponential')
-		# ~ params['chromatic_tail_only'] = config['DEFAULT'].get('chromatic_tail_only', 'false').lower() == 'false'
 		params['chromatic_tail_only'] = config['DEFAULT'].get('chromatic_tail_only', 'false').lower()
 		params['lum_weight'] = float(config['DEFAULT'].get('lum_weight', '0.7'))
 		params['rgb_multipliers'] = [float(x) for x in config['DEFAULT']['rgb_multipliers'].split(',')]
 		params['frame_skip'] = int(config['DEFAULT'].get('frame_skip', '0'))
 		params['motion_threshold'] = -1 * int(config['DEFAULT'].get('motion_threshold', '0'))
-		# ~ params['motion_blocks_static'] = config['DEFAULT'].get('motion_blocks_static', 'false').lower() == 'true'
-		# ~ params['static_blocks_motion'] = config['DEFAULT'].get('static_blocks_motion', 'false').lower() == 'true'
-		# ~ params['save_empty_frames'] = config['DEFAULT'].get('save_empty_frames', 'false').lower() == 'true'
 		params['motion_blocks_static'] = config['DEFAULT'].get('motion_blocks_static', 'false').lower()
 		params['static_blocks_motion'] = config['DEFAULT'].get('static_blocks_motion', 'false').lower()
 		params['save_empty_frames'] = config['DEFAULT'].get('save_empty_frames', 'false').lower()
 		
-		# Compute frame window size
-		frame_window = 4
+		# Compute base frame window size (number of sampled frames)
+		base_window = 4
 		if params['strategy'] == 'exponential':
 			if params['expA'] > 0.2 or params['expB'] > 0.2:
-				frame_window = 5
+				base_window = 5
 			if params['expA'] > 0.5 or params['expB'] > 0.5:
-				frame_window = 10
+				base_window = 10
 			if params['expA'] > 0.7 or params['expB'] > 0.7:
-				frame_window = 15
+				base_window = 15
 			if params['expA'] > 0.8 or params['expB'] > 0.8:
-				frame_window = 20
+				base_window = 20
 			if params['expA'] > 0.9 or params['expB'] > 0.9:
-				frame_window = 45
-		params['frame_window'] = frame_window * (params['frame_skip'] + 1)
+				base_window = 45
+		# store both: base sampled frames and total frames to read
+		params['base_frame_window'] = base_window
+		params['frame_window'] = base_window * (params['frame_skip'] + 1)
 		
 	except KeyError as e:
 		raise KeyError(f"Missing configuration parameter: {e}")
@@ -53,7 +52,13 @@ def load_config(config_path):
 def generate_base_images(video_path, frame_num, params):
 	"""
 	Generate base static and motion images for a specific video frame
-	using the same processing as the annotation tool
+	using the same processing as the annotation tool.
+
+	Interpretation: `frame_num` is the LAST frame of the motion window.
+	We sample `base_N = params['base_frame_window']` frames every `step = frame_skip+1`,
+	so the frames used are:
+	    start_frame, start_frame + step, ..., start_frame + (base_N-1)*step
+	where the last appended frame should equal frame_num (if possible).
 	"""
 	cap = cv2.VideoCapture(video_path)
 	if not cap.isOpened():
@@ -61,77 +66,97 @@ def generate_base_images(video_path, frame_num, params):
 		return None, None
 	
 	total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-	if frame_num >= total_frames:
-		print(f"Frame {frame_num} exceeds video length ({total_frames})")
+	if total_frames <= 0:
+		print(f"Video appears empty or unreadable: {video_path}")
+		cap.release()
 		return None, None
-	
-	# Calculate start frame for the buffer
-	# ~ start_frame = max(0, frame_num - params['frame_window'] + 1)
-	# ~ cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-	cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-	
-	prev_frames = [None] * 3
-	static_img = None
-	motion_img = None
-	frame_count = 0
-	diffs = None
-	gray_static = None
-	
-	# Process frames leading up to the target frame
-	for i in range(params['frame_window']):
+
+	# Parameters for sampling
+	step = params['frame_skip'] + 1
+	base_N = params.get('base_frame_window', 4)
+
+	# Compute intended start frame so that last appended index = frame_num
+	start_frame = int(frame_num - (base_N - 1) * step)
+	start_frame = max(0, start_frame)  # clamp to 0
+	if start_frame > total_frames - 1:
+		# nothing we can do
+		print(f"Start frame {start_frame} is beyond video length ({total_frames}) for {video_path}")
+		cap.release()
+		return None, None
+
+	# We'll read forward from start_frame and append every 'step' frames until we have base_N frames
+	cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+	collected = []
+	read_count = 0
+	idx = start_frame
+	while len(collected) < base_N and idx <= total_frames - 1:
 		ret, frame = cap.read()
 		if not ret:
 			break
-		
-		# Apply scaling if needed
-		if params['scale_factor'] != 1.0:
-			frame = cv2.resize(frame, None, fx=params['scale_factor'], 
-							  fy=params['scale_factor'])
-		
-		# Skip frames according to frame_skip
-		if frame_count > 0:
-			frame_count -= 1
+		# append only every 'step' frames
+		if (read_count % step) == 0:
+			if params['scale_factor'] != 1.0:
+				frame = cv2.resize(frame, None, fx=params['scale_factor'], fy=params['scale_factor'])
+			collected.append(frame.copy())
+		read_count += 1
+		idx += 1
+		# safety to prevent infinite loop
+		if read_count > params['frame_window'] + 10:
+			break
+
+	# If we couldn't collect any frames, fail
+	if not collected:
+		cap.release()
+		print(f"Could not collect frames for target {frame_num} (start {start_frame})")
+		return None, None
+
+	# If we collected fewer than base_N frames, we still try to compute motion from what we have.
+	# We'll mimic the annotator's prev_frames/diff update behavior: initialize prev_frames to first gray,
+	# then iterate through the rest updating prev_frames and computing diffs for the final frame.
+	prev_frames = [None] * 3
+	static_img = None
+	diffs = None
+	gray = None
+
+	for i, f in enumerate(collected):
+		if f is None:
 			continue
-		
-		# Process this frame (every frame_skip+1 frames)
-		frame_count = params['frame_skip']
-		gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-		
-		# Initialize on first valid frame
+		# prepare frame
+		frame_bgr = f
+		gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+
 		if static_img is None:
+			# initialize
+			static_img = frame_bgr.copy()
 			prev_frames = [gray.copy()] * 3
-			static_img = frame
+			# continue to next frame to allow diffs to get meaningful values
 			continue
-		
-		# Calculate differences with previous frames
+
+		# compute diffs relative to three prev frames
 		current_diffs = [cv2.absdiff(prev_frames[j], gray) for j in range(3)]
-		
-		# Update previous frames based on strategy
+
+		# update prev_frames according to strategy
 		if params['strategy'] == 'exponential':
 			prev_frames[0] = gray
-			prev_frames[1] = cv2.addWeighted(
-				prev_frames[1], params['expA'], 
-				gray, 1 - params['expA'], 0
-			)
-			prev_frames[2] = cv2.addWeighted(
-				prev_frames[2], params['expB'], 
-				gray, 1 - params['expB'], 0
-			)
+			prev_frames[1] = cv2.addWeighted(prev_frames[1], params['expA'], gray, 1 - params['expA'], 0)
+			prev_frames[2] = cv2.addWeighted(prev_frames[2], params['expB'], gray, 1 - params['expB'], 0)
 		elif params['strategy'] == 'sequential':
 			prev_frames[2] = prev_frames[1]
 			prev_frames[1] = prev_frames[0]
 			prev_frames[0] = gray
-		
-		# Store diffs for the target frame
-		# ~ if start_frame + i == frame_num:
-		static_img = frame
-		gray_static = gray
+
+		# store the diffs for the most recent processed frame
+		static_img = frame_bgr.copy()
 		diffs = current_diffs
-	
-	cap.release()
-	
 
+	# we want diffs corresponding to the last frame of the window (i.e. frame_num)
+	# If we don't have diffs (not enough frames), we can't build motion image reliably.
+	if diffs is None or gray is None:
+		cap.release()
+		print(f"Insufficient frames to compute diffs for {frame_num} (collected {len(collected)} frames)")
+		return None, None
 
+	# Build motion image using the same algorithm as annotator
 	if params['chromatic_tail_only'] == 'true':
 		tb = cv2.subtract(diffs[0], diffs[1])	
 		tr = cv2.subtract(diffs[2], diffs[1])
@@ -145,23 +170,9 @@ def generate_base_images(video_path, frame_num, params):
 		green = cv2.addWeighted(gray, params['lum_weight'], diffs[1], params['rgb_multipliers'][1], params['motion_threshold'])
 		red = cv2.addWeighted(gray, params['lum_weight'], diffs[2], params['rgb_multipliers'][0], params['motion_threshold'])
 
-	# ~ blue = cv2.addWeighted(
-		# ~ gray_static, params['lum_weight'],
-		# ~ diffs[0], params['rgb_multipliers'][2],
-		# ~ -params['motion_threshold']
-	# ~ )
-	# ~ green = cv2.addWeighted(
-		# ~ gray_static, params['lum_weight'],
-		# ~ diffs[1], params['rgb_multipliers'][1],
-		# ~ -params['motion_threshold']
-	# ~ )
-	# ~ red = cv2.addWeighted(
-		# ~ gray_static, params['lum_weight'],
-		# ~ diffs[2], params['rgb_multipliers'][0],
-		# ~ -params['motion_threshold']
-	# ~ )
 	motion_img = cv2.merge([blue, green, red]).astype(np.uint8)
-	
+
+	cap.release()
 	return static_img, motion_img
 
 def read_mask_file(mask_path):
@@ -214,11 +225,7 @@ def regenerate_annotations(config_path):
 	# Load configuration
 	params = load_config(config_path)
 	
-	# Find all label files
-	# ~ base_dirs = [
-		# ~ ('annot_static', ['train', 'val']),
-		# ~ ('annot_motion', ['train', 'val'])
-	# ~ ]
+	# Collect all unique base names (video_frame combinations) from motion labels
 	base_dirs = [
 		('annot_motion', ['train', 'val'])
 	]
@@ -239,15 +246,19 @@ def regenerate_annotations(config_path):
 	
 	# Process each unique frame
 	for base_name, split, base_dir in base_names:
-		# Extract video name and frame number
+		# Extract video name and frame number (frame number stored as LAST frame of window)
 		parts = base_name.split('_')
-		frame_num = int(parts[-1])
+		try:
+			frame_num = int(parts[-1])
+		except ValueError:
+			print(f"Skipping {base_name}: trailing token is not an integer")
+			continue
 		video_name = '_'.join(parts[:-1])
 		
 		# Find video file
 		video_path = None
 		clips_dir = 'clips'
-		for ext in ['.mp4', '.avi', '.mov', '.mkv']:
+		for ext in ['.mp4', '.avi', '.mov', '.mkv', '.MP4', '.AVI', '.MOV', '.MKV']:
 			test_path = os.path.join(clips_dir, video_name + ext)
 			if os.path.exists(test_path):
 				video_path = test_path
@@ -258,7 +269,7 @@ def regenerate_annotations(config_path):
 			print(f"Expecting video files ending with .mp4, .avi, .mov, or .mkv in /clips/ directory")
 			continue
 		
-		# Generate base images
+		# Generate base images: frame_num is interpreted as the LAST frame of the window
 		static_img, motion_img = generate_base_images(video_path, frame_num, params)
 		if static_img is None:
 			print(f"  Could not generate images for {base_name}")
@@ -279,26 +290,8 @@ def regenerate_annotations(config_path):
 		static_label_path = os.path.join('annot_static', 'labels', split, f"{base_name}.txt")
 		motion_label_path = os.path.join('annot_motion', 'labels', split, f"{base_name}.txt")
 		
-		# ~ # Process static image
-		# ~ if base_dir == 'annot_static' or params['save_empty_frames']:
-			# ~ static_final = static_img.copy()
-			
-			# ~ # Apply grey boxes
-			# ~ static_final = apply_grey_boxes(static_final, static_mask_boxes)
-			
-			# ~ # Apply motion blocking if enabled
-			# ~ if params['motion_blocks_static']:
-				# ~ motion_boxes = get_blocking_boxes(motion_label_path, img_w, img_h)
-				# ~ static_final = apply_blocking_boxes(static_final, motion_boxes)
-			
-			# ~ # Save static image
-			# ~ static_img_path = os.path.join('annot_static', 'images', split, f"{base_name}.jpg")
-			# ~ os.makedirs(os.path.dirname(static_img_path), exist_ok=True)
-			# ~ cv2.imwrite(static_img_path, static_final)
-			# ~ print(f"Regenerated static: {static_img_path}")
-		
 		# Process motion image
-		if base_dir == 'annot_motion' or params['save_empty_frames']:
+		if base_dir == 'annot_motion' or params['save_empty_frames'] == 'true':
 			if motion_img is None:
 				print(f"  Could not generate motion image for {base_name}")
 			else:
@@ -308,7 +301,7 @@ def regenerate_annotations(config_path):
 				motion_final = apply_grey_boxes(motion_final, motion_mask_boxes)
 				
 				# Apply static blocking if enabled
-				if params['static_blocks_motion']:
+				if params['static_blocks_motion'] == 'true':
 					static_boxes = get_blocking_boxes(static_label_path, img_w, img_h)
 					motion_final = apply_blocking_boxes(motion_final, static_boxes)
 				

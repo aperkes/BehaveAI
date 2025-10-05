@@ -10,6 +10,97 @@ import time
 import shutil
 import tkinter as tk
 from tkinter import messagebox
+import subprocess
+import time
+import config_watcher
+
+
+# --- NCNN helper utilities -----------------------
+
+
+def ncnn_dir_for_weights(weights_path):
+	"""Return the expected NCNN export directory for a given .pt path."""
+	base, ext = os.path.splitext(weights_path)
+	# Ultralytics export typically creates a folder named like "<base>_ncnn_model"
+	return base + "_ncnn_model"
+
+def ncnn_files_exist(ncnn_dir):
+	"""Return True if NCNN param+bin appear to exist in the export dir."""
+	if not os.path.isdir(ncnn_dir):
+		return False
+	# Look for .param and .bin files (ncnn export creates *.param and *.bin)
+	has_param = any(f.endswith(".param") for f in os.listdir(ncnn_dir))
+	has_bin = any(f.endswith(".bin") for f in os.listdir(ncnn_dir))
+	return has_param and has_bin
+
+def ensure_ncnn_export(weights_path, timeout=300):
+	"""
+	Ensure an NCNN conversion exists for weights_path.
+	Returns the ncnn_dir on success, None on failure (falls back to .pt).
+	This will skip conversion if the ncnn folder already exists.
+	"""
+	ncnn_dir = ncnn_dir_for_weights(weights_path)
+	if ncnn_files_exist(ncnn_dir):
+		return ncnn_dir
+
+	try:
+		print(f"Exporting {weights_path} -> NCNN (this may take a while)...")
+		model = YOLO(weights_path)
+		# Use Ultralytics export API. This creates the folder "<base>_ncnn_model".
+		# Some installs can be slow; we try and catch errors below.
+		model.export(format="ncnn")
+		# Wait a short time for files to appear (export is synchronous in most versions).
+		start = time.time()
+		while time.time() - start < timeout:
+			if ncnn_files_exist(ncnn_dir):
+				print(f"NCNN export complete: {ncnn_dir}")
+				return ncnn_dir
+			time.sleep(0.5)
+		# timed out
+		print(f"NCNN export timeout for {weights_path}")
+		return None
+	except Exception as e:
+		# Don't crash — export can fail on some systems; print useful debugging info and return None
+		print(f"Warning: NCNN export failed for {weights_path}: {e}")
+		return None
+
+def load_model_with_ncnn_preference(weights_path):
+	"""
+	Attempt to use NCNN if available (or convert it). If conversion or loading fails,
+	fall back to the original PyTorch .pt path.
+	Returns a YOLO model instance (which may wrap NCNN or .pt).
+	"""
+	# If a .pt was not provided (maybe already a folder), just try loading directly
+	if not weights_path.endswith(".pt"):
+		try:
+			return YOLO(weights_path)
+		except Exception as e:
+			print(f"Error loading model {weights_path}: {e}")
+			raise
+
+	ncnn_dir = ncnn_dir_for_weights(weights_path)
+	# prefer existing NCNN dir if present
+	if ncnn_files_exist(ncnn_dir):
+		try:
+			print(f"Loading NCNN model from {ncnn_dir}")
+			return YOLO(ncnn_dir)
+		except Exception as e:
+			print(f"Failed to load NCNN model at {ncnn_dir}: {e} (falling back to .pt)")
+
+	# Otherwise attempt conversion (one-time). If it fails, fall back to .pt.
+	exported = ensure_ncnn_export(weights_path)
+	if exported:
+		try:
+			return YOLO(exported)
+		except Exception as e:
+			print(f"Failed to load NCNN-exported model {exported}: {e} (falling back to .pt)")
+
+	# Finally, fallback to direct .pt load
+	print(f"Using original weights (PyTorch) at {weights_path}")
+	return YOLO(weights_path)
+# --------------------------------------------------------------------
+
+
 
 
 # Load configuration
@@ -80,9 +171,9 @@ try:
 	ignore_secondary = [name.strip() for name in config['DEFAULT']['ignore_secondary'].split(',')]
 	dominant_source = config['DEFAULT']['dominant_source'].lower()
 
-	primary_classifier = config['DEFAULT'].get('primary_classifier', 'yolo8s.pt') 
+	primary_classifier = config['DEFAULT'].get('primary_classifier', 'yolo11s.pt') 
 	primary_epochs = int(config['DEFAULT'].get('primary_epochs', '50'))
-	secondary_classifier = config['DEFAULT'].get('secondary_classifier', 'yolo8s-cls.pt')  
+	secondary_classifier = config['DEFAULT'].get('secondary_classifier', 'yolo11s-cls.pt')  
 	secondary_epochs = int(config['DEFAULT'].get('secondary_epochs', '50'))
 
 	if hierarchical_mode:
@@ -112,6 +203,7 @@ try:
 	strategy = config['DEFAULT'].get('strategy', 'exponential')
 	chromatic_tail_only = config['DEFAULT']['chromatic_tail_only'].lower()
 	rgb_multipliers = [float(x) for x in config['DEFAULT']['rgb_multipliers'].split(',')]
+	use_ncnn = config['DEFAULT']['use_ncnn'].lower()
 	primary_conf_thresh = float(config['DEFAULT'].get('primary_conf_thresh', '0.5'))
 	secondary_conf_thresh = float(config['DEFAULT'].get('secondary_conf_thresh', '0.5'))
 	match_distance_thresh = float(config['DEFAULT'].get('match_distance_thresh', '200'))
@@ -146,110 +238,166 @@ if dominant_source != 'motion' and dominant_source != 'static' and dominant_sour
 
 
 
+# check whether settings have been changed, and motion annotation library needs rebuilding 
+settings_changed = config_watcher.check_settings_changed(current_config_path='BehaveAI_settings.ini', saved_config_path=None, model_dirs=['model_primary_motion'])
+# Globals for prompting/behaviour inside maybe_retrain
+regen_prompt_shown = False
+force_rebuild_motion = False
+
+
 global_response = 0 # if 'yes' is selected for any model re-training, retraining should be perfoemd for all models
 
 def count_images_in_dataset(path):
-    ## Count images in a dataset, handling both YAML-based and directory-based datasets
-    # If path is a YAML file (primary models)
-    if path.endswith('.yaml'):
-        try:
-            import yaml
-            with open(path, 'r') as f:
-                data = yaml.safe_load(f)
-            
-            # Get the path to the training images
-            train_path = data['train']
-            base_dir = os.path.dirname(path)
-            abs_train_path = os.path.join(base_dir, train_path)
-            
-            # Handle different dataset formats
-            if abs_train_path.endswith('.txt'):
-                # Text file with image paths
-                with open(abs_train_path, 'r') as f:
-                    return len(f.readlines())
-            else:
-                # Directory with images
-                image_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
-                return len([f for f in os.listdir(abs_train_path) 
-                            if os.path.splitext(f)[1].lower() in image_exts])
-        except Exception as e:
-            print(f"Error counting images: {e}")
-            return 0
-    
-    # If path is a directory (secondary models)
-    elif os.path.isdir(path):
-        total_count = 0
-        image_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
-        
-        # Walk through all subdirectories
-        for root, dirs, files in os.walk(path):
-            # Only count files in leaf directories (class directories)
-            if not dirs:  # This is a leaf directory (no subdirectories)
-                count = sum(1 for f in files 
-                           if os.path.splitext(f)[1].lower() in image_exts)
-                total_count += count
-                
-        return total_count
-    
-    else:
-        print(f"Unsupported dataset format: {path}")
-        return 0
+	## Count images in a dataset, handling both YAML-based and directory-based datasets
+	# If path is a YAML file (primary models)
+	if path.endswith('.yaml'):
+		try:
+			import yaml
+			with open(path, 'r') as f:
+				data = yaml.safe_load(f)
+			
+			# Get the path to the training images
+			train_path = data['train']
+			base_dir = os.path.dirname(path)
+			abs_train_path = os.path.join(base_dir, train_path)
+			
+			# Handle different dataset formats
+			if abs_train_path.endswith('.txt'):
+				# Text file with image paths
+				with open(abs_train_path, 'r') as f:
+					return len(f.readlines())
+			else:
+				# Directory with images
+				image_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
+				return len([f for f in os.listdir(abs_train_path) 
+							if os.path.splitext(f)[1].lower() in image_exts])
+		except Exception as e:
+			print(f"Error counting images: {e}")
+			return 0
+	
+	# If path is a directory (secondary models)
+	elif os.path.isdir(path):
+		total_count = 0
+		image_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
+		
+		# Walk through all subdirectories
+		for root, dirs, files in os.walk(path):
+			# Only count files in leaf directories (class directories)
+			if not dirs:  # This is a leaf directory (no subdirectories)
+				count = sum(1 for f in files 
+						   if os.path.splitext(f)[1].lower() in image_exts)
+				total_count += count
+				
+		return total_count
+	
+	else:
+		print(f"Unsupported dataset format: {path}")
+		return 0
 
 
 def maybe_retrain(model_type, yaml_path, project_path, model_path, classifier, epochs, imgsz):
-	global global_response
-	# Check if dataset has changed and offer to retrain if needed
-	# Create count file path
-	count_file = os.path.join(project_path, 'train_count.txt')
-	
-	# Get current image count
-	current_count = count_images_in_dataset(yaml_path)
-	
+	global global_response, regen_prompt_shown, force_rebuild_motion
+
+	# If settings have changed and we haven't asked yet, prompt the user whether
+	# they want to rebuild the annotation dataset now.
+	if settings_changed and not regen_prompt_shown:
+		regen_prompt_shown = True
+		root = tk.Tk()
+		root.withdraw()
+		msg = (
+			"Motion-related settings differ from the saved snapshot.\n\n"
+			"Do you want to rebuild the annotation dataset now?\n\n"
+			"If you choose Yes, the regeneration script will run and ALL motion models\n"
+			"will be rebuilt automatically (no further prompts for motion models)."
+		)
+		user_wants_regen = messagebox.askyesno("Rebuild annotations?", msg)
+		root.destroy()
+
+		if user_wants_regen:
+			print("User requested regeneration of annotations...")
+			rc = config_watcher.run_regeneration(regen_script='Regenerate_annotations.py', regen_args=None)
+			if rc == 0:
+				print("Regeneration script completed successfully.")
+			else:
+				print(f"Warning: regeneration script returned code {rc}.")
+			# Force automatic rebuild of motion models
+			force_rebuild_motion = True
+			# Also ensure we rebuild at least once
+			global_response = 1
+
+	# If the model already exists and we are forcing rebuild for motion models,
+	# and this is a motion model, rebuild it without asking.
+	is_motion_model = ('motion' in model_type.lower()) or ('secondary_motion' in project_path.lower()) or ('primary_motion' in project_path.lower())
+
 	if os.path.exists(model_path):
-		# Check if count file exists
-		if os.path.exists(count_file):
-			with open(count_file, 'r') as f:
+		# If force_rebuild_motion is set and this is a motion model, retrain silently
+		if force_rebuild_motion and is_motion_model:
+			print(f"Force-rebuilding (motion) model: {model_type}")
+			# Backup existing model
+			backup_dir = project_path + "_backup"
+			i = 1
+			while os.path.exists(f"{backup_dir}{i}"):
+				i += 1
+			final_backup = f"{backup_dir}{i}"
+			shutil.copytree(project_path, final_backup)
+			print(f"Existing model copied to {final_backup}")
+
+			start_weights = os.path.join(final_backup, "train", "weights", "best.pt")
+			print(f'Training new {model_type} model using existing weights...')
+			model = YOLO(start_weights)
+			model.train(
+				data=yaml_path,
+				epochs=epochs,
+				imgsz=imgsz,
+				project=project_path,
+				name="train",
+				exist_ok=True
+			)
+			print(f'Done training {model_type} model')
+			# Save new count (same behaviour as before)
+			current_count = count_images_in_dataset(yaml_path)
+			count_file = os.path.join(project_path, 'train_count.txt')
+			with open(count_file, 'w') as f:
+				f.write(str(current_count))
+			# Save config snapshot alongside the motion model for future checks
+			try:
+				config_watcher.save_config_with_model(project_path)
+			except Exception as e:
+				print(f"Warning: could not save settings snapshot with model: {e}")
+			return True
+
+		# Existing behaviour: compare counts and ask the user (GUI prompt)
+		if os.path.exists(os.path.join(project_path, 'train_count.txt')):
+			with open(os.path.join(project_path, 'train_count.txt'), 'r') as f:
 				last_count = int(f.read().strip())
 		else:
-			last_count = -1  # Force retrain prompt if file missing
-		
-		# Compare counts
-		if current_count != last_count:
-			# ~ print(f"\nNew annotations detected for {model_type}: {last_count} -> {current_count} images")
-			# ~ response = input(f"Do you want to re-train the {model_type} model? (y/n): ").strip().lower()
+			last_count = -1
 
-			# Display GUI prompt instead of terminal input
+		current_count = count_images_in_dataset(yaml_path)
+
+		if current_count != last_count:
 			root = tk.Tk()
-			root.withdraw()  # Hide the root window
-			
+			root.withdraw()
 			msg = (
-			    f"New annotations detected for '{model_type}' model.\n"
-			    f"Image count changed from {last_count} to {current_count}.\n\n"
-			    "Do you want to re-train this model?"
+				f"New annotations detected for '{model_type}' model.\n"
+				f"Image count changed from {last_count} to {current_count}.\n\n"
+				"Do you want to re-train this model?"
 			)
-			
 			response = messagebox.askyesno("Retrain model?", msg)
 			root.destroy()
 
-
-			# ~ if response == 'y' or global_response == 1:
 			if response or global_response == 1:
-				global_response = 1 # 
-				# Backup existing model
+				global_response = 1
+				# Backup and retrain (same flow as original)
 				backup_dir = project_path + "_backup"
 				i = 1
 				while os.path.exists(f"{backup_dir}{i}"):
 					i += 1
 				final_backup = f"{backup_dir}{i}"
-				
-				# ~ shutil.move(project_path, final_backup)
 				shutil.copytree(project_path, final_backup)
 				print(f"Existing model copied to {final_backup}")
-
-				# Use existing weights as starting point
 				start_weights = os.path.join(final_backup, "train", "weights", "best.pt")
-				
-				# Train new model
+
 				print(f'Training new {model_type} model using existing weights...')
 				model = YOLO(start_weights)
 				model.train(
@@ -261,13 +409,17 @@ def maybe_retrain(model_type, yaml_path, project_path, model_path, classifier, e
 					exist_ok=True
 				)
 				print(f'Done training {model_type} model')
-				
-				# Save new count
-				with open(count_file, 'w') as f:
+				with open(os.path.join(project_path, 'train_count.txt'), 'w') as f:
 					f.write(str(current_count))
+				# If this is a motion model, save the snapshot with the model
+				if is_motion_model:
+					try:
+						config_watcher.save_config_with_model(project_path)
+					except Exception as e:
+						print(f"Warning: could not save settings snapshot with model: {e}")
 				return True
 	else:
-		# First-time training
+		# First-time training (same behaviour as before), but save snapshot if it's a motion model
 		print(f'{model_type} model not found, building it...')
 		model = YOLO(classifier)
 		model.train(
@@ -279,12 +431,18 @@ def maybe_retrain(model_type, yaml_path, project_path, model_path, classifier, e
 			exist_ok=True
 		)
 		print(f'Done training {model_type} model')
-		
-		# Save count
+
+		current_count = count_images_in_dataset(yaml_path)
 		os.makedirs(project_path, exist_ok=True)
-		with open(count_file, 'w') as f:
+		with open(os.path.join(project_path, 'train_count.txt'), 'w') as f:
 			f.write(str(current_count))
-	
+
+		if is_motion_model:
+			try:
+				config_watcher.save_config_with_model(project_path)
+			except Exception as e:
+				print(f"Warning: could not save settings snapshot with model: {e}")
+
 	return False
 
 # Train secondary classifiers for each static class
@@ -317,7 +475,10 @@ if hierarchical_mode:
 				weights_path, secondary_classifier, secondary_epochs, 224)
 
 			# Load the trained model
-			secondary_static_models[primary_class] = YOLO(weights_path)
+			if use_ncnn == 'true':
+				secondary_static_models[primary_class] = load_model_with_ncnn_preference(weights_path)
+			else:
+				secondary_static_models[primary_class] = YOLO(weights_path)
 
 
 		# ~ print(f"secondary_static_models {secondary_static_models}")
@@ -347,7 +508,10 @@ if hierarchical_mode:
 				weights_path, secondary_classifier, secondary_epochs, 224)
 
 			# Load the trained model
-			secondary_motion_models[primary_class] = YOLO(weights_path)
+			if use_ncnn == 'true':
+				secondary_motion_models[primary_class] = load_model_with_ncnn_preference(weights_path)
+			else:
+				secondary_motion_models[primary_class] = YOLO(weights_path)
 				
 		# ~ print(f"secondary_motion_models {secondary_motion_models}")
 
@@ -572,9 +736,17 @@ def process_video(file):
 	)
 
 	if primary_static_classes[0] != '0':
-		model_static = YOLO(primary_static_model_path)
+		if use_ncnn == 'true':
+			model_static = load_model_with_ncnn_preference(primary_static_model_path)
+		else:
+			model_static = YOLO(primary_static_model_path)
+		 
 	if primary_motion_classes[0] != '0':
-		model_motion = YOLO(primary_motion_model_path)
+		if use_ncnn == 'true':
+			model_motion = load_model_with_ncnn_preference(primary_motion_model_path)
+		else:
+			model_motion = YOLO(primary_motion_model_path)
+		
 		
 	tracker = KalmanTracker(match_distance_thresh, delete_after_missed)
 
