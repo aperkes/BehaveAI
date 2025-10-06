@@ -32,7 +32,7 @@ Download the BehaveAI files and place them in a working directory on your system
 Double-click _Windows_Launcher.bat_ and the first time it runs it will set up your python virtual environment and install required libraries. It will attempt to install GPU drivers if they're available, but these vary between system - follow the prompts. Once installed you can just double-click this file again to launch BehaveAI.
 
 ### Linux (Ubuntu & Raspbian) auto install & launch:
-Right click the _Linux_Launcher.sh_, click 'properties' and emable 'Executable as Program' (or similar), the right-click again and select 'Run as Program' (or similar). On first run this will set up the python virtual environment and install required libraries. Once installed you can just run this script again to launch BehaveAI.
+Right click the _Linux_Launcher.sh_, click 'properties' and enable 'Executable as Program' (or similar), the right-click again and select 'Run as Program' (or similar). On first run this will set up the python virtual environment and install required libraries. Once installed you can just run this script again to launch BehaveAI.
 
 ### General installation in any python environment (Windows, Linux & MacOS):
 You need a python3 environment with a few extra libraries. Note that you will generally want to use a python 'virtual environment' that keeps your python environment from messing with system libraries. You'll need OpenCV (in linux it's generally best to insall OpenCV system-wide rather than using pip in your virtual environment), numpy, ultralytics, scipy, and PyYAML. These can be installed using pip with the following command:
