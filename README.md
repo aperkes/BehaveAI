@@ -12,49 +12,54 @@ The BehaveAI framework converts motion information into false colours that allow
 - Can track any type(s) of animal/object
 - Tracks multiple individuals, classifying the behaviour of each independently
 - Semi-supervised annotation allows you to learn where the models are weak and focus on improving performance
-- Tools for insepcting and editing the annotation library
-- Built around the verstile [YOLO](https://github.com/ultralytics/ultralytics) (You Only Look Once) architecture
+- Tools for inspecting and editing the annotation library
+- Built around the versatile [YOLO](https://github.com/ultralytics/ultralytics) (You Only Look Once) architecture
 - Computationally efficient - runs fine on low-end devices without GPUs
 - Intuitive user interface with installers for Windows and Linux (including Raspberry Pi)
 - Free & open source ([GNU Afferro General Public License](https://github.com/troscianko/BehaveAI/blob/main/LICENSE))
 
 ## Prerequisites & installation
 
-### Windows:
-Download the files. Double-click _Windows_Launcher.bat_ and the first time it runs it will set up your python virtual environment and install required libraries. It will attempt to install GPU drivers if they're available, but these vary between system - follow the prompts.
+### Hardware:
 
-### Linux (Ubuntu & Raspbian):
-Downlaod the files, right click the _Linux_Launcher.sh_, click 'properties' and emable 'Exectutable as Program', the right-click again and select 'Run as Program' (or similar). On first run this will set up the python virtual envrionment and install required libraries.
+A CUDA-enabled GPU speeds up the training significantly, but the framework works fine without.
 
-### MacOS, or your own Python Virtual Envrionment
-You need a python3 environment (Windows, Linux or Mac) with a few extra libraries: OpenCV, numpy, ultralytics, scipy, and PyYAML. These can be installed using pip with the following command:
+### Download the scripts:
+
+Download the BehaveAI files and place them in a working directory on your system. Also make a directory here called 'clips' where you place the videos you'll use for annotation (this is not essential, but placing them here will allow you to alter the motion settings and rebuild the annotation library at a later date). 
+
+### Windows auto install & launch:
+Double-click _Windows_Launcher.bat_ and the first time it runs it will set up your python virtual environment and install required libraries. It will attempt to install GPU drivers if they're available, but these vary between system - follow the prompts. Once installed you can just double-click this file again to launch BehaveAI.
+
+### Linux (Ubuntu & Raspbian) auto install & launch:
+Right click the _Linux_Launcher.sh_, click 'properties' and emable 'Executable as Program' (or similar), the right-click again and select 'Run as Program' (or similar). On first run this will set up the python virtual environment and install required libraries. Once installed you can just run this script again to launch BehaveAI.
+
+### General installation in any python environment (Windows, Linux & MacOS):
+You need a python3 environment with a few extra libraries. Note that you will generally want to use a python 'virtual environment' that keeps your python environment from messing with system libraries. You'll need OpenCV (in linux it's generally best to insall OpenCV system-wide rather than using pip in your virtual environment), numpy, ultralytics, scipy, and PyYAML. These can be installed using pip with the following command:
 
 ```shell
 pip install opencv-python numpy ultralytics scipy PyYAML
 ```
-
-A CUDA-enabled GPU speeds up the training, but it works fine without.
  
-Place the BehaveAI files in a working directory and [adjust the _BehaveAI_settings.ini_ file](#setting-parameters) to fit your needs using a text editor. For convenience, also create a subdirectory here named 'clips' and place your video files within. Run the BehaveAI.py script (either from the command line, [Anaconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html), or an IDE such as [Geany](https://github.com/geany/geany), [Jupyter](https://github.com/jupyter/notebook), [Spyder](https://github.com/spyder-ide/spyder), or [Visual Studio Code](https://github.com/microsoft/vscode)). This will bring up the launcher GUI:
+Run the BehaveAI.py script (either from the command line, [Anaconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html), or an IDE such as [Geany](https://github.com/geany/geany), [Jupyter](https://github.com/jupyter/notebook), [Spyder](https://github.com/spyder-ide/spyder), or [Visual Studio Code](https://github.com/microsoft/vscode)). This will bring up the launcher GUI:
 
 <img width="600" alt="Launcher GUI" src="https://github.com/user-attachments/assets/e9a7e7da-d3e9-435a-82dc-6ddd6b1c8c76" />
-
 
 Click _Annotate_ and select a file for annotation. Once you've done enough annotating click _Train & batch classify_. 
  
 ## Setting parameters
 
-You need to adjust the BehaveAI_settings.ini file with your settings. Have a read through the [table](#parameters) below to see what each parameter controls. Note that each class needs an associated keyboard hotkey and colour code or it'll throw an error - see the existing format. You can chose between [YOLO versions](https://github.com/ultralytics/ultralytics/tree/main?tab=readme-ov-file#-documentation) (e.g. YOLOv8 or YOLO11), and [model sizes](https://github.com/ultralytics/ultralytics?tab=readme-ov-file#-models) (e.g. n=nano or s=small). You can also specify what proportion of annotations should be automatically allocated to training and validation (you can manually move the files around later if you'd like though - just be sure to move both images and labels between the 'train' and 'val' subdirectories).
+You need to adjust the _BehaveAI_settings.ini_ file](#setting-parameters) to fit your needs using a text editor. Have a read through the [table](#parameters) below to see what each parameter controls. Note that each class needs an associated keyboard hotkey and colour code or it'll throw an error - see the existing format. You can chose between [YOLO versions](https://github.com/ultralytics/ultralytics/tree/main?tab=readme-ov-file#-documentation) (e.g. YOLOv8 or YOLO11), and [model sizes](https://github.com/ultralytics/ultralytics?tab=readme-ov-file#-models) (e.g. n=nano or s=small). You can also specify what proportion of annotations should be automatically allocated to training and validation (you can manually move the files around later if you'd like though - just be sure to move both images and labels between the 'train' and 'val' subdirectories).
 
 ### Primary and secondary, static and motion classifiers
 
-The BehaveAI framework uses two streams of video information, still (_static_) frames, and false-colour-motion (_motion_) frames. Within these, [primary classifiers](#simple-tracking-example) (either motion or static) detect and classify objects across entire frames. You must specify at least one primary classifier, but can specify multiple across both motion and static streams. These can encompass both the same target in different motion states (e.g. stationary vs flying bird), and different targets in their respective motion states (e.g. flying bird vs swimming fish). The aim here is to make detection as easy as possible for the classifier (some things are easier to see with motion, others static), while incoperating target types desired by the user.
+The BehaveAI framework uses two streams of video information, still (_static_) frames, and false-colour-motion (_motion_) frames. Within these, [primary classifiers](#simple-tracking-example) (either motion or static) detect and classify objects across entire frames. You must specify at least one primary classifier, but can specify multiple across both motion and static streams. These can encompass both the same target in different motion states (e.g. stationary vs flying bird), and different targets in their respective motion states (e.g. flying bird vs swimming fish). The aim here is to make _detection_ as easy as possible for the classifier (some things are easier to see with motion, others static), while incorporating target types desired by the user.
 
 ![Motion Examples 1](https://github.com/user-attachments/assets/fefe09f0-46bc-49f3-b18d-0fa1afdcc48d)
 
 _Example of static and motion frames from the same section of video_
  
-You can then optionally use secondary classifiers to identify featues within primary classes (making your model hierarchical). When you specify these, anything found by a primary classifier will be cropped and sent to the secondary classifier (e.g. male vs female classification for the primary class of a stationary bird). This can allow you to separate the tasks of detection and feature extraction. See the [fly](#complex-hierarchical-example) and [gull](#motion-strategy) examples for a somewhat complex mix. There is nuance to utilising these settings effectively. You might not want all primary classes to be sent to a secondary classifier, such as a fly in flight (its wings are a blur, so it's not possible to determine the sex, so flying flies are ignored by the secondary classifiers). For the highest computational efficiecy, specify a single primary class and let the secondary classifiers (which are much faster as they use cropped regions) do more work.
+You can then optionally use secondary classifiers to identify featues within primary classes (making your model hierarchical). When you specify these, anything found by a primary classifier will be cropped and sent to the secondary classifier (e.g. male vs female classification for the primary class of a stationary bird). This can allow you to separate the tasks of _detection_ and _classification_. See the [fly](#complex-hierarchical-example) and [gull](#motion-strategy) examples for a somewhat complex mix. There is nuance to utilising these settings effectively. You might not want all primary classes to be sent to a secondary classifier, such as a fly in flight (its wings are a blur, so it's not possible to determine the sex, so flying flies are ignored by the secondary classifiers). For the highest computational efficiency, specify a single primary class and let the secondary classifiers (which are much faster as they use cropped regions) do more work.
 
 ![Motion Examples 2](https://github.com/user-attachments/assets/d0b1ec20-c306-40c1-a6af-7d72432c47d8)
 
@@ -96,7 +101,7 @@ dominant_source = confidence
 
 Tracking flies on lilly pads using three primary motion classes (_walk_, _fly_ and _display_). When the flies aren't moving they're difficult to spot in the motion stream, so we also add a primary static class (_rest_) to find them from the static stream. However, the static classifier will be able to see all the cases of flies walking, flying or displaying that aren't classed as _rest_. This would likely confuse the static classifier because a walking fly looks a lot like a resting fly. So we add _motion_blocks_static = true_ to hide all the instances of walking, flying or displaying flies from the static classifier.
 
-We also want to determine the sex of each fly from its wing markings, so add _male_ and _female_ as secondary static classes. However, whe displaying or in flight these wing marking won't be visible, so we can tell the model to ignore running the secondary classifier for these cases (_ignore_secondary = display, fly_). Finally, flies will often be detected by both the motion and static classifier, but the motion one will be more reliable and make very few false positive errors, so we set this to be the dominant stream for detections (_dominant_source = motion_). This only affects the video output - data from both streams are saved in the output.
+We also want to determine the sex of each fly from its wing markings, so add _male_ and _female_ as secondary static classes. However, when displaying or in flight these wing marking won't be visible, so we can tell the model to ignore running the secondary classifier for these cases (_ignore_secondary = display, fly_). Finally, flies will often be detected by both the motion and static classifier, but the motion one will be more reliable and make very few false positive errors, so we set this to be the dominant stream for detections (_dominant_source = motion_). This only affects the video output - data from both streams are saved in the output.
 
 _BehaveAI_settings.ini_ file:
 
@@ -141,7 +146,7 @@ In certain cases, the motion stream may not be the best option for classifying a
 _Example of a case where the static stream may be preferable to the motion stream due to camera movement_
 
 ### Parameters
-TLDR: The only things you really must change to fit your project are the primary and secondary classes (and each needs keys and colours associated). Have a look at the motion in your examples and consider tweaking the strategy. The defaults for everything else will likely get you started. Other than tracking and Kalman filter settings, you can't change the values mid-way through annotation.
+TLDR: The only things you really must change to fit your project are the primary and secondary classes (and each needs keys and colours associated). Have a look at the motion in your examples and consider tweaking the strategy. The defaults for everything else will likely get you started. Note that you can adjust/change any of the motion processing settings at a later date. The framework will notice that you've altered the settings and offer to rebuild the annotation library from the video files using your new settings. This function only works if the videos used for annotations are in the 'clips' directory. You'll also need to re-build the motion models if these settings change (again you'll be prompted to do this if a change is detected). The only thing to be aware of is that the boxes drawn around your moving objects might not be optimised with altered settings. Use the 'Insepct Dataset' function to check the boxes look good.
 
 | Parameter | Range | Description |
 |----|----|----|
@@ -220,7 +225,7 @@ Once you've got an initial annotation dataset (e.g. 50-100 annotations), click _
 
 ## Auto-annotation
 
-Once you've trained an initial model the annotation script it will use this in a semi-supervised 'auto-annotation' fashion, attempting to automatically detect and classify things as you annotate. This will show you where the model is working well, and where it's not (closing the training loop). Use this opportunity to correct any errors it's making. Add things that it misses (false negatives), remove any incorrect detections (false positives), redraw boxes that are missaligned, and correct objects that are missclassfied. Importantly, you can also add plain background frames (with nothing annotated) in cases where it's falsely detecting elements of the background.
+Once you've trained an initial model the annotation script it will use this in a semi-supervised 'auto-annotation' fashion, attempting to automatically detect and classify things as you annotate. This will show you where the model is working well, and where it's not (closing the training loop). Use this opportunity to correct any errors it's making. Add things that it misses (false negatives), remove any incorrect detections (false positives), redraw boxes that are misaligned, and correct objects that are misclassified. Importantly, you can also add plain background frames (with nothing annotated) in cases where it's falsely detecting elements of the background.
 
 ![Annotation Example 1](https://github.com/user-attachments/assets/97ebd2ef-6c6b-4c80-be7d-8b1c4f45e7c4)
 
@@ -238,7 +243,7 @@ If you'd prefer to train the model from scratch rather than retrain your existin
 
 <img width="600" alt="Launcher retrain" src="https://github.com/user-attachments/assets/b075a4ee-b7d6-4624-9ba8-7151144bd080" />
 
-Once you're happy with the model, create a folder in your working directory called 'input' containing the videos that you wish to analyse (ideally not the ones you used for training in order to be conservative). Run the BehaveAI_classify_track.py script. It will update the models if necessary, and will then run inference on all of the videos in your 'input' directory, outputing the results as a .csv file that details all the detections frame-by-frame, together with confidence scores, class hierachies, and tracking IDs. You might want to play with the Kalman filter and confidence theshold parameters to improve tracking performance. You can adjust them to specify how fast objects can change direction, how much underlying noise there is in the positional accuracy, how confident the model needs to be to accept detections, and how much objects can overlap before they are treated as a single entity.
+Once you're happy with the model, create a folder in your working directory called 'input' containing the videos that you wish to analyse (ideally not the ones you used for training in order to be conservative). Run the BehaveAI_classify_track.py script. It will update the models if necessary, and will then run inference on all of the videos in your 'input' directory, outputting the results as a .csv file that details all the detections frame-by-frame, together with confidence scores, class hierarchies, and tracking IDs. You might want to play with the Kalman filter and confidence threshold parameters to improve tracking performance. You can adjust them to specify how fast objects can change direction, how much underlying noise there is in the positional accuracy, how confident the model needs to be to accept detections, and how much objects can overlap before they are treated as a single entity.
 
 ## Workflow
 
