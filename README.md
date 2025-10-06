@@ -219,6 +219,8 @@ The aim is to build up an annotation dataset for initial model training, so focu
 | = | Zoom in preview window (+ key) |
 | - | Zoom out preview window |
 
+### Inspect Dataset
+Clicking _Inspect Dataset_ from the BehaveAI launcher will open a tool that shows you the labelled/annotated frames in your current dataset. You can use this to check that all your annotations are correct, and delete or adjust them at and stage. The functionality is much the same as the annotation tool above, flipping between motion and static frames. It shows images from the training and validation datasets. Sometimes during annotation you might find that your threshold for discriminating between two classes of something shifts slightly (we learn more as we encounter more borderline cases). This tool lets you go back and undo any errors made early on in the annotation process.
 
  
 ## Building & running the initial model
