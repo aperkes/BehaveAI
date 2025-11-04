@@ -55,7 +55,7 @@ You need to adjust the _BehaveAI_settings.ini_ file](#setting-parameters) to fit
 
 <p align="center"> <img width="550" alt="BehaveAI structure" src="https://github.com/user-attachments/assets/1e00ffda-7c52-4388-9a9b-fa35c5294f05" /> </p>
 
-_Overview of the framework's static and motion streams, hierarchical model structure, and classifier integration_
+_Overview of the BehaveAI framework's static and motion streams, hierarchical model structure, and classifier integration_
 
 ### Primary and secondary, static and motion classifiers
 
