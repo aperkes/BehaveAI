@@ -140,7 +140,7 @@ dominant_source = motion
 <img src="https://github.com/user-attachments/assets/60743d69-9e88-4ceb-923c-0b7796f0ce00" width="900"/>
 
 
-_Figure showing the different motion strategies (exponential vs sequential), plus the function of lum_weight and frame_skip, of a gull taking flight_
+_Examples of the different motion strategies (exponential vs sequential), plus the functions of lum_weight and frame_skip across species_
 
 Two different user-selectable motion strategies are available; the ‘_exponential_’ method calculates the absolute difference between the current frame and the previous frames, exponentially smoothing over successive frames to show different temporal ranges in different colour channels. With this mode, a moving object creates a white ‘difference’ image that leaves behind a motion blur that fades from white to blue, to green, to red. Increasing the exponential smoothing weights allows this method to show events further back in time at almost no extra computational cost when running the classifier because there is no need to re-load any previous frames. This mode is better able to convey changes in speed within each frame; accelerating objects will outpace their red tail, creating a blue-to-green streak, while deceleration will allow the red tail to catch up, creating yellow-to-red tails.
 
