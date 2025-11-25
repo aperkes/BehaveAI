@@ -232,8 +232,8 @@ The aim is to build up an annotation dataset for initial model training, so focu
 | Backspace | Clear all annotations in current frame |
 | G | Draw a grey box to hide elements from training (e.g. when you're not sure and don't want to confuse the classifier either way) |
 | U | Undo last annotation (in annotation or grey box mode). Note that right-click also deletes annotations. You can also search the annotation directories (based on video name and frame number) to manually delete images and labels later if you make mistakes |
-| Right arrow | Next frame |
-| Left arrow | Previous frame |
+| Right arrow or ] | Next frame |
+| Left arrow or [ | Previous frame |
 | > | Jump forward 10 frames |
 | < | Jump backwards 10 frames |
 | Escape | Exit annotation |
