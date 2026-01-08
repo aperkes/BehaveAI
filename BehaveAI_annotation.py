@@ -12,15 +12,71 @@ from ultralytics import YOLO
 from collections import deque
 import platform
 import config_watcher
+import sys
 
+# ---------- Determine settings INI path and project directory ----------
+def choose_ini_path_from_dialog():
+	root = tk.Tk()
+	root.withdraw()
+	ini_path = filedialog.askopenfilename(
+		title="Select BehaveAI settings INI",
+		filetypes=[("INI files", "*.ini"), ("All files", "*.*")]
+	)
+	root.destroy()
+	return ini_path
 
+# If a command-line argument is provided, interpret as project dir or INI path.
+# Otherwise prompt the user with a file picker.
+if len(sys.argv) > 1:
+	arg = os.path.abspath(sys.argv[1])
+	if os.path.isdir(arg):
+		config_path = os.path.join(arg, "BehaveAI_settings.ini")
+	else:
+		config_path = arg
+else:
+	config_path = choose_ini_path_from_dialog()
+	if not config_path:
+		# user cancelled
+		tk.messagebox.showinfo("No settings file", "No settings INI selected — exiting.")
+		sys.exit(0)
+
+config_path = os.path.abspath(config_path)
+
+if not os.path.exists(config_path):
+	# show a GUI error then exit
+	try:
+		root = tk.Tk(); root.withdraw()
+		messagebox.showerror("Missing settings", f"Configuration file not found: {config_path}")
+		root.destroy()
+	except Exception:
+		# fallback to console message if GUI isn't available
+		print(f"Configuration file not found: {config_path}")
+	sys.exit(1)
+
+# Make the project directory the working directory so all relative paths resolve there.
+project_dir = os.path.dirname(config_path)
+os.chdir(project_dir)
+print(f"Using project directory: {project_dir}")
+print(f"Using config file: {config_path}")
 
 # Load configuration
 config = configparser.ConfigParser()
-config_path = 'BehaveAI_settings.ini'
-if not os.path.exists(config_path):
-	raise FileNotFoundError(f"Configuration file not found: {config_path}")
+config.optionxform = str  # preserve case if needed
 config.read(config_path)
+
+# Helper: resolve a path from INI (absolute or relative to project_dir)
+def resolve_project_path(value, fallback):
+    if value is None or str(value).strip() == '':
+        value = fallback
+    value = str(value)
+    if os.path.isabs(value):
+        return os.path.normpath(value)
+    return os.path.normpath(os.path.join(project_dir, value))
+
+# Read dataset / directory keys from INI (defaults are relative names inside the project)
+clips_dir_ini = config['DEFAULT'].get('clips_dir', 'clips')
+clips_dir = resolve_project_path(clips_dir_ini, 'clips')
+
 
 # Read parameters
 try:
@@ -101,7 +157,6 @@ try:
 		secondary_colors = list(secondary_colors)	
 		secondary_class_ids = list(secondary_class_ids)
 		secondary_hotkeys = list(secondary_hotkeys)
-	
 
 			
 	static_train_images_dir = 'annot_static/images/train'
@@ -268,8 +323,8 @@ if primary_motion_classes[0] != '0':
 
 if motion_model_count > 0:
 	# check whether settings have been changed, and motion annotation library needs rebuilding 
-	settings_changed = config_watcher.check_settings_changed(current_config_path='BehaveAI_settings.ini', saved_config_path=None, model_dirs=['model_primary_motion'])
-	
+	settings_changed = config_watcher.check_settings_changed(current_config_path=config_path, saved_config_path=None, model_dirs=['model_primary_motion'])	
+
 	if settings_changed:
 		root = tk.Tk()
 		root.withdraw()
@@ -290,7 +345,7 @@ if motion_model_count > 0:
 
 
 # File dialog for video selection
-clips_dir = os.path.join(os.getcwd(), "clips")
+# ~ clips_dir = os.path.join(os.getcwd(), "clips")
 initial_dir = clips_dir if os.path.isdir(clips_dir) else os.getcwd()
 
 root = tk.Tk()

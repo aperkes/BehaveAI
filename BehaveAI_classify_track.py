@@ -9,9 +9,8 @@ import configparser
 import time
 import shutil
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 import subprocess
-import time
 import config_watcher
 import sys
 
@@ -103,13 +102,65 @@ def load_model_with_ncnn_preference(weights_path, task):
 
 
 
+# ---------- Project-aware configuration loading --------------------------
+
+def pick_ini_via_dialog():
+    root = tk.Tk()
+    root.withdraw()
+    path = filedialog.askopenfilename(
+        title="Select BehaveAI settings INI",
+        filetypes=[("INI files", "*.ini"), ("All files", "*.*")]
+    )
+    root.destroy()
+    return path
+
+# Determine config_path (accept project dir or direct INI path)
+if len(sys.argv) > 1:
+    arg = os.path.abspath(sys.argv[1])
+    if os.path.isdir(arg):
+        config_path = os.path.join(arg, "BehaveAI_settings.ini")
+    else:
+        config_path = arg
+else:
+    config_path = pick_ini_via_dialog()
+    if not config_path:
+        tk.messagebox.showinfo("No settings file", "No settings INI selected — exiting.")
+        sys.exit(0)
+
+config_path = os.path.abspath(config_path)
+if not os.path.exists(config_path):
+    tk.messagebox.showerror("Missing settings", f"Configuration file not found: {config_path}")
+    sys.exit(1)
+
+# Set project directory to the INI parent and make it the working directory
+project_dir = os.path.dirname(config_path)
+os.chdir(project_dir)
+print(f"Working directory set to project dir: {project_dir}")
+print(f"Using settings file: {config_path}")
 
 # Load configuration
 config = configparser.ConfigParser()
-config_path = 'BehaveAI_settings.ini'
-if not os.path.exists(config_path):
-	raise FileNotFoundError(f"Configuration file not found: {config_path}")
+config.optionxform = str  # keep case
 config.read(config_path)
+
+# Helper: resolve a path from INI (absolute or relative to project_dir)
+def resolve_project_path(value, fallback):
+    if value is None or str(value).strip() == '':
+        value = fallback
+    value = str(value)
+    if os.path.isabs(value):
+        return os.path.normpath(value)
+    return os.path.normpath(os.path.join(project_dir, value))
+
+# Read dataset / directory keys from INI (defaults are relative names inside the project)
+clips_dir_ini = config['DEFAULT'].get('clips_dir', 'clips')
+input_dir_ini = config['DEFAULT'].get('input_dir', 'input')
+output_dir_ini = config['DEFAULT'].get('output_dir', 'output')
+
+clips_dir = resolve_project_path(clips_dir_ini, 'clips')
+input_folder = resolve_project_path(input_dir_ini, 'input')
+output_folder = resolve_project_path(output_dir_ini, 'output')
+
 
 # Read parameters
 try:
@@ -249,7 +300,7 @@ if len(primary_motion_classes) > 0:
 
 
 # check whether settings have been changed, and motion annotation library needs rebuilding 
-settings_changed = config_watcher.check_settings_changed(current_config_path='BehaveAI_settings.ini', saved_config_path=None, model_dirs=['model_primary_motion'])
+settings_changed = config_watcher.check_settings_changed(current_config_path=config_path, saved_config_path=None, model_dirs=['model_primary_motion'])
 # Globals for prompting/behaviour inside maybe_retrain
 regen_prompt_shown = False
 force_rebuild_motion = False

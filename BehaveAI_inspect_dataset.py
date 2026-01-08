@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-"""
-Annotation inspector/editor adapted from the original BehaveAI annotator.
-
-- Scans the static & motion annotation image folders (train & val) and builds a combined list of items.
-- For each item it loads existing static & motion images (if present), their labels and mask (.mask.txt).
-- Presents the same UI as original: draw boxes, grey boxes, delete with right-click, change classes with hotkeys, ENTER -> overwrite files & advance.
-- If a video matching the saved video_label is found in ./clips, will attempt to open it and show a small animation preview (works if filenames follow video_label_frameNumber.jpg convention).
-- Works fine without videos.
-"""
-
 import cv2
 import os
 import numpy as np
@@ -20,18 +9,74 @@ import random
 import time
 from ultralytics import YOLO
 from collections import deque
+import sys
 
-# ---------------------------------------------------------------------------
-# ---------- (KEEP YOUR EXISTING CONFIG PARSING HERE UNCHANGED) -------------
-# ---------------------------------------------------------------------------
+# ---------- Determine settings INI path and project directory ----------
+def choose_ini_path_from_dialog():
+	root = tk.Tk()
+	root.withdraw()
+	ini_path = filedialog.askopenfilename(
+		title="Select BehaveAI settings INI",
+		filetypes=[("INI files", "*.ini"), ("All files", "*.*")]
+	)
+	root.destroy()
+	return ini_path
+
+# If a command-line argument is provided, interpret as project dir or INI path.
+# Otherwise prompt the user with a file picker.
+if len(sys.argv) > 1:
+	arg = os.path.abspath(sys.argv[1])
+	if os.path.isdir(arg):
+		config_path = os.path.join(arg, "BehaveAI_settings.ini")
+	else:
+		config_path = arg
+else:
+	config_path = choose_ini_path_from_dialog()
+	if not config_path:
+		# user cancelled
+		tk.messagebox.showinfo("No settings file", "No settings INI selected — exiting.")
+		sys.exit(0)
+
+config_path = os.path.abspath(config_path)
+
+if not os.path.exists(config_path):
+	# show a GUI error then exit
+	try:
+		root = tk.Tk(); root.withdraw()
+		messagebox.showerror("Missing settings", f"Configuration file not found: {config_path}")
+		root.destroy()
+	except Exception:
+		# fallback to console message if GUI isn't available
+		print(f"Configuration file not found: {config_path}")
+	sys.exit(1)
+
+# Make the project directory the working directory so all relative paths resolve there.
+project_dir = os.path.dirname(config_path)
+os.chdir(project_dir)
+print(f"Using project directory: {project_dir}")
+print(f"Using config file: {config_path}")
+
 # Load configuration
 config = configparser.ConfigParser()
-config_path = 'BehaveAI_settings.ini'
-if not os.path.exists(config_path):
-	raise FileNotFoundError(f"Configuration file not found: {config_path}")
+config.optionxform = str  # preserve case if needed
 config.read(config_path)
 
-# Read parameters (same as your original script)
+
+# Helper: resolve a path from INI (absolute or relative to project_dir)
+def resolve_project_path(value, fallback):
+    if value is None or str(value).strip() == '':
+        value = fallback
+    value = str(value)
+    if os.path.isabs(value):
+        return os.path.normpath(value)
+    return os.path.normpath(os.path.join(project_dir, value))
+
+# Read dataset / directory keys from INI (defaults are relative names inside the project)
+clips_dir_ini = config['DEFAULT'].get('clips_dir', 'clips')
+clips_dir = resolve_project_path(clips_dir_ini, 'clips')
+
+
+# Read parameters
 try:
 	primary_motion_classes = [name.strip() for name in config['DEFAULT']['primary_motion_classes'].split(',')]
 	cols = [c.strip() for c in config['DEFAULT'].get('primary_motion_colors', '').split(';') if c.strip()]
@@ -701,7 +746,7 @@ def find_video_for_item(item):
 	  - Falls back to startswith matching only if no exact stem match exists.
 	  - Returns (video_path_or_None, frame_number_or_None).
 	"""
-	clips_dir = os.path.join(os.getcwd(), "clips")
+	# ~ clips_dir = os.path.join(os.getcwd(), "clips")
 	if not os.path.isdir(clips_dir):
 		return None, None
 
@@ -1125,12 +1170,12 @@ while True:
 				show_mode = 1
 			grey_mode = False
 			refresh_display()
-	elif key == 83 or key == 93:  # Right arrow or ]
+	elif key == 83:  # right arrow
 		current_idx = min(current_idx + 1, len(items) - 1)
 		cv2.setTrackbarPos('Item', video_name, current_idx)
 		load_item(current_idx)
 		frame_updated = True
-	elif key == 81 or key == 91:  # Left arrow or [
+	elif key == 81:  # left arrow
 		current_idx = max(current_idx - 1, 0)
 		cv2.setTrackbarPos('Item', video_name, current_idx)
 		load_item(current_idx)
