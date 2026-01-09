@@ -23,6 +23,10 @@ The framework also supports hierarchical models (e.g. detect something from it's
 - Intuitive user interface with installers for Windows and Linux (including Raspberry Pi)
 - Free & open source ([GNU Afferro General Public License](https://github.com/troscianko/BehaveAI/blob/main/LICENSE))
 
+## User guide & installation instructions
+
+See the project wiki [here](https://github.com/troscianko/BehaveAI/wiki) for detailed user guide and installation instructions.
+
 ## Manuscript:
 [BioRXIV pre-print](https://www.biorxiv.org/content/10.1101/2025.11.04.686536v1)
 
