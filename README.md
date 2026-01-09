@@ -11,9 +11,9 @@ The framework also supports hierarchical models (e.g. detect something from it's
 
 
 #### Key features:
-- Fast user-friendly annotation - in under an hour you can create a powerful tracking model
 - Identifies objects and their behaviour based on motion and/or static appearance
-- Identifies small, fast moving, and motion-blurred targets
+- Fast user-friendly annotation - in under an hour you can create a powerful tracking model
+- Identifies small (2 px!), fast moving, and motion-blurred targets
 - Can track any type(s) of animal/object
 - Tracks multiple individuals, classifying the behaviour of each independently
 - Semi-supervised annotation allows you to learn where the models are weak and focus on improving performance
