@@ -18,9 +18,10 @@ The framework also supports hierarchical models (e.g. detect something from it's
 - Tracks multiple individuals, classifying the behaviour of each independently
 - Semi-supervised annotation allows you to learn where the models are weak and focus on improving performance
 - Tools for inspecting and editing the annotation library
+- Live (edge) support - record videos, train, then run live video processing using the user interface
 - Built around the versatile [YOLO](https://github.com/ultralytics/ultralytics) (You Only Look Once) architecture
 - Computationally efficient - runs fine on low-end devices without GPUs
-- Intuitive user interface with installers for Windows and Linux (including Raspberry Pi)
+- Intuitive user interface with installers for Windows and Linux (including Raspberry Pi) and full user-interface
 - Free & open source ([GNU Afferro General Public License](https://github.com/troscianko/BehaveAI/blob/main/LICENSE))
 
 ## User guide & installation instructions
