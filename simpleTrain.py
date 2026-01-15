@@ -679,7 +679,7 @@ if primary_static_classes[0] != '0':
 if primary_motion_classes[0] != '0':
     #maybe_retrain('primary motion', primary_motion_yaml_path, primary_motion_project_path, 
         #primary_motion_model_path, primary_classifier, primary_epochs, 640)
-    simple_retrain('primary static', primary_static_yaml_path, primary_static_project_path, 
+    simple_retrain('primary motion', primary_static_yaml_path, primary_static_project_path, 
         primary_static_model_path, primary_classifier, primary_epochs, 640)
 
 
